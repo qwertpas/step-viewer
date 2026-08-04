@@ -1,16 +1,5 @@
-# Local STEP Viewer
+Browser-based viewer for drag and drop `.step` and `.stp` CAD files. Great for quickly visualizing CAD files to send or receive from others.
 
-A private, local viewer for `.step` and `.stp` CAD files. Files are parsed in the browser and are never uploaded.
+All processing is done on your machine. There is no server.
 
-Live: <https://qwertpas.github.io/step-viewer/>
-
-## Start on macOS
-
-Double-click `start.command`, or run:
-
-```sh
-npm install
-npm run dev
-```
-
-Then open <http://127.0.0.1:5173> and drop in a STEP file.
+<https://qwertpas.github.io/step-viewer/>
