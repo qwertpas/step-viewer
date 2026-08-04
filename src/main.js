@@ -20,6 +20,8 @@ const componentTree = document.querySelector("#component-tree");
 const componentCount = document.querySelector("#component-count");
 const showAllButton = document.querySelector("#show-all");
 const hideAllButton = document.querySelector("#hide-all");
+const expandTreeButton = document.querySelector("#expand-tree");
+const collapseTreeButton = document.querySelector("#collapse-tree");
 const collapseComponentsButton = document.querySelector("#collapse-components");
 
 const scene = new THREE.Scene();
@@ -68,6 +70,7 @@ model.add(surfaces, outlines);
 scene.add(model);
 let partObjects = [];
 let treeEntries = [];
+let branchEntries = [];
 
 function dispose(group) {
   group.traverse((item) => {
@@ -214,11 +217,15 @@ function makeTreeRow(node, depth, fallbackName) {
     childList.className = "component-children";
     children.forEach((child, index) => childList.appendChild(makeTreeRow(child, depth + 1, `Component ${index + 1}`)));
     item.appendChild(childList);
-    branch.addEventListener("click", () => {
+    const toggleBranch = () => {
       const collapsed = childList.toggleAttribute("hidden");
       branch.textContent = collapsed ? "›" : "⌄";
       branch.setAttribute("aria-label", collapsed ? "Expand component" : "Collapse component");
-    });
+    };
+    branch.addEventListener("click", toggleBranch);
+    label.classList.add("expandable");
+    label.addEventListener("click", toggleBranch);
+    branchEntries.push({ branch, childList });
   }
   return item;
 }
@@ -226,6 +233,7 @@ function makeTreeRow(node, depth, fallbackName) {
 function buildComponentTree(root, meshes) {
   componentTree.replaceChildren();
   treeEntries = [];
+  branchEntries = [];
   const referenced = new Set(collectMeshIndices(root));
   const roots = root.name?.trim() || root.meshes?.length ? [root] : (root.children || []);
   roots.forEach((node, index) => componentTree.appendChild(makeTreeRow(node, 0, `Component ${index + 1}`)));
@@ -330,6 +338,20 @@ edgesButton.addEventListener("click", () => {
 
 showAllButton.addEventListener("click", () => setPartsVisible(partObjects.map((_, index) => index), true));
 hideAllButton.addEventListener("click", () => setPartsVisible(partObjects.map((_, index) => index), false));
+expandTreeButton.addEventListener("click", () => {
+  branchEntries.forEach(({ branch, childList }) => {
+    childList.hidden = false;
+    branch.textContent = "⌄";
+    branch.setAttribute("aria-label", "Collapse component");
+  });
+});
+collapseTreeButton.addEventListener("click", () => {
+  branchEntries.forEach(({ branch, childList }) => {
+    childList.hidden = true;
+    branch.textContent = "›";
+    branch.setAttribute("aria-label", "Expand component");
+  });
+});
 collapseComponentsButton.addEventListener("click", () => {
   const collapsed = componentsPanel.classList.toggle("collapsed");
   collapseComponentsButton.textContent = collapsed ? "+" : "−";
