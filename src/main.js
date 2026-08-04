@@ -71,6 +71,7 @@ scene.add(model);
 let partObjects = [];
 let treeEntries = [];
 let branchEntries = [];
+let loadedMeshes = [];
 
 function dispose(group) {
   group.traverse((item) => {
@@ -172,7 +173,20 @@ function makeTreeRow(node, depth, fallbackName) {
   row.style.setProperty("--depth", depth);
   item.appendChild(row);
 
-  const children = node.children || [];
+  const name = node.name?.trim() || fallbackName;
+  const nestedChildren = node.children || [];
+  const meshChildren = !node.meshLeaf && (node.meshes || []).length > 1
+    ? node.meshes.map((meshIndex, index) => {
+        const meshName = loadedMeshes[meshIndex]?.name?.trim();
+        return {
+          name: meshName && meshName !== name ? meshName : `${name} ${index + 1}`,
+          meshes: [meshIndex],
+          children: [],
+          meshLeaf: true,
+        };
+      })
+    : [];
+  const children = [...nestedChildren, ...meshChildren];
   const branch = document.createElement("button");
   branch.className = "branch-button";
   branch.textContent = children.length ? "⌄" : "";
@@ -181,7 +195,6 @@ function makeTreeRow(node, depth, fallbackName) {
   row.appendChild(branch);
 
   const indices = collectMeshIndices(node);
-  const name = node.name?.trim() || fallbackName;
   const visibility = document.createElement("button");
   visibility.className = "visibility-button";
   visibility.setAttribute("aria-label", `Hide ${name}`);
@@ -216,7 +229,11 @@ function makeTreeRow(node, depth, fallbackName) {
     const childList = document.createElement("div");
     childList.className = "component-children";
     children.forEach((child, index) => childList.appendChild(makeTreeRow(child, depth + 1, `Component ${index + 1}`)));
+    const startsCollapsed = meshChildren.length > 0;
+    childList.hidden = startsCollapsed;
     item.appendChild(childList);
+    branch.textContent = startsCollapsed ? "›" : "⌄";
+    branch.setAttribute("aria-label", startsCollapsed ? "Expand component" : "Collapse component");
     const toggleBranch = () => {
       const collapsed = childList.toggleAttribute("hidden");
       branch.textContent = collapsed ? "›" : "⌄";
@@ -234,6 +251,7 @@ function buildComponentTree(root, meshes) {
   componentTree.replaceChildren();
   treeEntries = [];
   branchEntries = [];
+  loadedMeshes = meshes;
   const referenced = new Set(collectMeshIndices(root));
   const roots = root.name?.trim() || root.meshes?.length ? [root] : (root.children || []);
   roots.forEach((node, index) => componentTree.appendChild(makeTreeRow(node, 0, `Component ${index + 1}`)));
