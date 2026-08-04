@@ -55,7 +55,11 @@ button { color: inherit; font: inherit; }
 .component-actions button { height: 26px; padding: 0 6px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; font-size: 9px; }
 .component-actions button:hover { color: var(--ink); background: rgba(30,36,42,.07); }
 .component-actions .collapse-components { width: 25px; margin-left: 3px; border-left: 1px solid var(--line); border-radius: 0 5px 5px 0; font-size: 15px; line-height: 1; }
-.component-tree { max-height: calc(100vh - 196px); overflow: auto; padding: 6px; scrollbar-color: #b5bac0 transparent; scrollbar-width: thin; }
+.tree-toolbar { display: flex; align-items: center; gap: 2px; height: 33px; padding: 4px 7px; border-bottom: 1px solid var(--line); }
+.tree-toolbar button { height: 24px; padding: 0 6px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; font-size: 8px; }
+.tree-toolbar button:hover { color: var(--ink); background: rgba(30,36,42,.07); }
+.tree-toolbar span { flex: 1; }
+.component-tree { max-height: calc(100vh - 229px); overflow: auto; padding: 6px; scrollbar-color: #b5bac0 transparent; scrollbar-width: thin; }
 .component-row { display: flex; align-items: center; height: 30px; padding: 0 5px 0 calc(2px + var(--depth) * 16px); border-radius: 6px; }
 .component-row:hover { background: rgba(30,36,42,.055); }
 .branch-button, .visibility-button { display: grid; flex: 0 0 auto; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
@@ -71,9 +75,10 @@ button { color: inherit; font: inherit; }
 .part-icon, .assembly-icon { position: relative; flex: 0 0 auto; width: 13px; height: 13px; margin: 0 7px 0 3px; border: 1px solid #899097; border-radius: 2px; background: linear-gradient(135deg, #f7f8f9 48%, #cfd3d7 50%); transform: rotate(45deg) scale(.72); }
 .assembly-icon { box-shadow: 4px -4px 0 -1px #eef0f2, 4px -4px 0 0 #899097; }
 .component-name { min-width: 0; overflow: hidden; flex: 1; color: #3f454b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.component-name.expandable { cursor: pointer; }
 .part-total { display: grid; min-width: 17px; height: 17px; margin-left: 5px; place-items: center; border-radius: 9px; color: #747a81; background: rgba(30,36,42,.07); font-size: 8px; }
 .components.collapsed { width: 150px; }
-.components.collapsed .component-tree, .components.collapsed .components-header > div:first-child span, .components.collapsed .component-actions button:not(.collapse-components) { display: none; }
+.components.collapsed .component-tree, .components.collapsed .tree-toolbar, .components.collapsed .components-header > div:first-child span, .components.collapsed .component-actions button:not(.collapse-components) { display: none; }
 .components.collapsed .components-header { border-bottom: 0; }
 
 .empty-state { position: absolute; top: 50%; left: 50%; z-index: 2; display: flex; width: min(390px, calc(100vw - 44px)); min-height: 224px; flex-direction: column; align-items: center; justify-content: center; border: 1.5px dashed #a5aab1; border-radius: 19px; background: rgba(248,249,250,.72); box-shadow: 0 20px 70px rgba(37,43,49,.06); cursor: pointer; transform: translate(-50%, -50%); backdrop-filter: blur(13px); }
@@ -107,7 +112,7 @@ button { color: inherit; font: inherit; }
   .file-name, .mouse-help { display: none; }
   .view-tools { top: 72px; right: 8px; }
   .components { top: 72px; left: 8px; width: min(260px, calc(100vw - 64px)); max-height: calc(100vh - 130px); }
-  .component-tree { max-height: calc(100vh - 176px); }
+  .component-tree { max-height: calc(100vh - 209px); }
   .statusbar { right: 8px; bottom: 8px; left: 8px; }
   .model-stats { margin-left: 10px; }
 }
