@@ -101,8 +101,7 @@ function setView(direction) {
   const distance = camera.position.distanceTo(controls.target);
   controls.target.copy(center);
   camera.position.copy(center).addScaledVector(direction.normalize(), distance);
-  camera.up.set(0, 0, Math.abs(direction.z) > 0.9 ? 0 : 1);
-  if (Math.abs(direction.z) > 0.9) camera.up.set(0, 1, 0);
+  camera.up.set(0, 0, 1);
   controls.update();
 }
 
@@ -317,7 +316,8 @@ document.querySelectorAll("[data-view]").forEach((button) => {
     const directions = {
       front: new THREE.Vector3(0, -1, 0),
       right: new THREE.Vector3(1, 0, 0),
-      top: new THREE.Vector3(0, 0, 1),
+      // A tiny offset avoids OrbitControls' singularity at the exact Z pole.
+      top: new THREE.Vector3(0, -0.0001, 1),
     };
     setView(directions[button.dataset.view]);
   });
