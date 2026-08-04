@@ -15,6 +15,12 @@ const statusDot = document.querySelector("#status-dot");
 const stats = document.querySelector("#model-stats");
 const edgesButton = document.querySelector("#edges");
 const dropLayer = document.querySelector("#drop-layer");
+const componentsPanel = document.querySelector("#components");
+const componentTree = document.querySelector("#component-tree");
+const componentCount = document.querySelector("#component-count");
+const showAllButton = document.querySelector("#show-all");
+const hideAllButton = document.querySelector("#hide-all");
+const collapseComponentsButton = document.querySelector("#collapse-components");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe8eaed);
@@ -60,6 +66,8 @@ const surfaces = new THREE.Group();
 const outlines = new THREE.Group();
 model.add(surfaces, outlines);
 scene.add(model);
+let partObjects = [];
+let treeEntries = [];
 
 function dispose(group) {
   group.traverse((item) => {
@@ -98,7 +106,7 @@ function setView(direction) {
   controls.update();
 }
 
-function addMesh(part) {
+function addMesh(part, index) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(part.attributes.position.array, 3));
   if (part.attributes.normal) {
@@ -114,6 +122,7 @@ function addMesh(part) {
     new THREE.MeshStandardMaterial({ color, metalness: 0.08, roughness: 0.52 }),
   );
   surface.name = part.name;
+  surface.userData.partIndex = index;
   surfaces.add(surface);
 
   const edgeGeometry = new THREE.EdgesGeometry(geometry, 25);
@@ -121,8 +130,116 @@ function addMesh(part) {
     edgeGeometry,
     new THREE.LineBasicMaterial({ color: 0x22272e, transparent: true, opacity: 0.36 }),
   );
+  edge.userData.partIndex = index;
   outlines.add(edge);
-  return part.index.array.length / 3;
+  return { surface, edge, triangles: part.index.array.length / 3 };
+}
+
+function collectMeshIndices(node) {
+  const indices = [...(node.meshes || [])];
+  for (const child of node.children || []) indices.push(...collectMeshIndices(child));
+  return [...new Set(indices)];
+}
+
+function updateTreeStates() {
+  for (const entry of treeEntries) {
+    const shown = entry.indices.filter((index) => partObjects[index]?.surface.visible).length;
+    entry.button.classList.toggle("off", shown === 0);
+    entry.button.classList.toggle("mixed", shown > 0 && shown < entry.indices.length);
+    entry.button.setAttribute("aria-pressed", String(shown > 0));
+    entry.button.title = shown ? `Hide ${entry.name}` : `Show ${entry.name}`;
+  }
+}
+
+function setPartsVisible(indices, visible) {
+  for (const index of indices) {
+    const part = partObjects[index];
+    if (!part) continue;
+    part.surface.visible = visible;
+    part.edge.visible = visible;
+  }
+  updateTreeStates();
+}
+
+function makeTreeRow(node, depth, fallbackName) {
+  const item = document.createElement("div");
+  item.className = "component-item";
+
+  const row = document.createElement("div");
+  row.className = "component-row";
+  row.style.setProperty("--depth", depth);
+  item.appendChild(row);
+
+  const children = node.children || [];
+  const branch = document.createElement("button");
+  branch.className = "branch-button";
+  branch.textContent = children.length ? "⌄" : "";
+  branch.disabled = !children.length;
+  branch.setAttribute("aria-label", children.length ? "Collapse component" : "No child components");
+  row.appendChild(branch);
+
+  const indices = collectMeshIndices(node);
+  const name = node.name?.trim() || fallbackName;
+  const visibility = document.createElement("button");
+  visibility.className = "visibility-button";
+  visibility.setAttribute("aria-label", `Hide ${name}`);
+  visibility.setAttribute("aria-pressed", "true");
+  visibility.innerHTML = "<span></span>";
+  visibility.addEventListener("click", () => {
+    const allVisible = indices.every((index) => partObjects[index]?.surface.visible);
+    setPartsVisible(indices, !allVisible);
+  });
+  row.appendChild(visibility);
+
+  const icon = document.createElement("span");
+  icon.className = children.length ? "assembly-icon" : "part-icon";
+  row.appendChild(icon);
+
+  const label = document.createElement("span");
+  label.className = "component-name";
+  label.textContent = name;
+  label.title = name;
+  row.appendChild(label);
+
+  if (indices.length > 1) {
+    const total = document.createElement("span");
+    total.className = "part-total";
+    total.textContent = String(indices.length);
+    row.appendChild(total);
+  }
+
+  treeEntries.push({ button: visibility, indices, name });
+
+  if (children.length) {
+    const childList = document.createElement("div");
+    childList.className = "component-children";
+    children.forEach((child, index) => childList.appendChild(makeTreeRow(child, depth + 1, `Component ${index + 1}`)));
+    item.appendChild(childList);
+    branch.addEventListener("click", () => {
+      const collapsed = childList.toggleAttribute("hidden");
+      branch.textContent = collapsed ? "›" : "⌄";
+      branch.setAttribute("aria-label", collapsed ? "Expand component" : "Collapse component");
+    });
+  }
+  return item;
+}
+
+function buildComponentTree(root, meshes) {
+  componentTree.replaceChildren();
+  treeEntries = [];
+  const referenced = new Set(collectMeshIndices(root));
+  const roots = root.name?.trim() || root.meshes?.length ? [root] : (root.children || []);
+  roots.forEach((node, index) => componentTree.appendChild(makeTreeRow(node, 0, `Component ${index + 1}`)));
+
+  meshes.forEach((mesh, index) => {
+    if (referenced.has(index)) return;
+    componentTree.appendChild(makeTreeRow({ name: mesh.name, meshes: [index], children: [] }, 0, `Part ${index + 1}`));
+  });
+  componentCount.textContent = `${meshes.length} ${meshes.length === 1 ? "part" : "parts"}`;
+  componentsPanel.hidden = false;
+  componentsPanel.classList.remove("collapsed");
+  collapseComponentsButton.textContent = "−";
+  updateTreeStates();
 }
 
 let importerPromise;
@@ -164,7 +281,9 @@ async function openFile(file) {
     dispose(surfaces);
     dispose(outlines);
     let triangles = 0;
-    result.meshes.forEach((part) => { triangles += addMesh(part); });
+    partObjects = result.meshes.map((part, index) => addMesh(part, index));
+    partObjects.forEach((part) => { triangles += part.triangles; });
+    buildComponentTree(result.root, result.meshes);
     outlines.visible = edgesButton.classList.contains("active");
     fitModel();
 
@@ -207,6 +326,14 @@ document.querySelectorAll("[data-view]").forEach((button) => {
 edgesButton.addEventListener("click", () => {
   const enabled = edgesButton.classList.toggle("active");
   outlines.visible = enabled;
+});
+
+showAllButton.addEventListener("click", () => setPartsVisible(partObjects.map((_, index) => index), true));
+hideAllButton.addEventListener("click", () => setPartsVisible(partObjects.map((_, index) => index), false));
+collapseComponentsButton.addEventListener("click", () => {
+  const collapsed = componentsPanel.classList.toggle("collapsed");
+  collapseComponentsButton.textContent = collapsed ? "+" : "−";
+  collapseComponentsButton.title = collapsed ? "Expand panel" : "Collapse panel";
 });
 
 let dragDepth = 0;

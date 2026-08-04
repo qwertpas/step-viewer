@@ -25,6 +25,21 @@
         <button data-view="top" title="Top view">T</button>
       </aside>
 
+      <aside id="components" class="components" hidden>
+        <header class="components-header">
+          <div>
+            <strong>Components</strong>
+            <span id="component-count"></span>
+          </div>
+          <div class="component-actions">
+            <button id="show-all" title="Show all components">Show all</button>
+            <button id="hide-all" title="Hide all components">Hide all</button>
+            <button id="collapse-components" class="collapse-components" title="Collapse panel">−</button>
+          </div>
+        </header>
+        <div id="component-tree" class="component-tree"></div>
+      </aside>
+
       <button id="empty" class="empty-state">
         <span class="file-icon">STEP</span>
         <strong>Drop a STEP file here</strong>
