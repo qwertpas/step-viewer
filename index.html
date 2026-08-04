@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#e8eaed" />
+    <title>STEP Viewer</title>
+  </head>
+  <body>
+    <main id="app">
+      <div id="canvas"></div>
+
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark"></span> STEP Viewer</div>
+        <div id="file-name" class="file-name">No model open</div>
+        <button id="open" class="open-button"><span>＋</span> Open file</button>
+        <input id="file-input" type="file" accept=".step,.stp" hidden />
+      </header>
+
+      <aside class="view-tools" aria-label="View controls">
+        <button id="fit" title="Fit model" aria-label="Fit model">⌗</button>
+        <span></span>
+        <button data-view="front" title="Front view">F</button>
+        <button data-view="right" title="Right view">R</button>
+        <button data-view="top" title="Top view">T</button>
+      </aside>
+
+      <button id="empty" class="empty-state">
+        <span class="file-icon">STEP</span>
+        <strong>Drop a STEP file here</strong>
+        <small>or click to browse · .step and .stp</small>
+      </button>
+
+      <div id="loading" class="loading-card" hidden>
+        <span class="spinner"></span> Tessellating model…
+      </div>
+
+      <footer class="statusbar">
+        <div><span id="status-dot" class="status-dot"></span><span id="status">Drop a STEP file anywhere</span></div>
+        <div id="model-stats" class="model-stats" hidden></div>
+        <button id="edges" class="active" disabled>Edges</button>
+        <div class="mouse-help"><b>Drag</b> rotate <b>Shift + drag</b> pan <b>Scroll</b> zoom</div>
+      </footer>
+
+      <div id="drop-layer" class="drop-layer" hidden>
+        <div><span>↓</span><strong>Drop to open</strong></div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
