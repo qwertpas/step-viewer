@@ -49,7 +49,6 @@ button { color: inherit; font: inherit; }
 .open-button:disabled { opacity: .65; cursor: wait; }
 .file-actions { display: flex; justify-self: end; align-items: center; gap: 10px; }
 .share-action { position: relative; }
-.share-action small { position: absolute; right: 0; top: 38px; white-space: nowrap; font-size: 12px; color: #4d535a; background: #f4f6f8; border-radius: 4px; padding: 2px 5px; }
 .share-button { height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff9; font-size: 14px; cursor: pointer; white-space: nowrap; }
 .share-button:disabled { opacity: .5; cursor: default; }
 .share-button:hover:not(:disabled) { background: white; }

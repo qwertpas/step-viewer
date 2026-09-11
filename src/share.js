@@ -2,7 +2,6 @@ import { shareUrl } from "./drive.js";
 
 export function setupSharing(drive) {
   const button = document.querySelector("#share");
-  const note = document.querySelector("#share-note");
   const panel = document.querySelector("#share-panel");
   const message = document.querySelector("#share-message");
   const link = document.querySelector("#share-link");
@@ -15,7 +14,6 @@ export function setupSharing(drive) {
   function update() {
     button.disabled = !file || loading || busy;
     button.textContent = busy ? "Sharing…" : "Copy share link";
-    note.hidden = !file;
   }
 
   function report(text) {
