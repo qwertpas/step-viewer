@@ -1,6 +1,7 @@
 import * as THREE from "three";
+import { nameNodes } from "./names.js";
 
-export function buildParts(result) {
+export function buildParts(result, filename) {
   const handles = new Map(result.exactGeometryBindings?.map((binding) => [binding.geometryId, binding.exactShapeHandle]));
   const geometries = result.geometries.map((part) => {
     const geometry = new THREE.BufferGeometry();
@@ -52,7 +53,7 @@ export function buildParts(result) {
   const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x22272e, transparent: true, opacity: 0.36 });
   function visit(node, parent) {
     const transform = parent.clone().multiply(new THREE.Matrix4().fromArray(node.transform));
-    const meshes = node.meshes.map((index) => {
+    const meshes = node.meshes.map((index, body) => {
       const source = geometries[index];
       const surface = new THREE.Mesh(source.geometry, source.materials);
       const edge = new THREE.LineSegments(source.edges, edgeMaterial);
@@ -62,14 +63,14 @@ export function buildParts(result) {
       surface.userData.partIndex = id;
       edge.userData.partIndex = id;
       parts.push({
-        surface, edge, name: node.name || source.data.name, triangles: source.geometry.index.count / 3,
+        surface, edge, name: node.bodyNames[body], triangles: source.geometry.index.count / 3,
         data: source.data, edgeIds: source.edgeIds, handle: source.handle, transform: transform.toArray(),
       });
       return id;
     });
     return { name: node.name, meshes, children: node.children.map((child) => visit(child, transform)) };
   }
-  const root = { name: "", meshes: [], children: result.rootNodes.map((node) => visit(node, new THREE.Matrix4())) };
+  const root = { name: "", meshes: [], children: nameNodes(result.rootNodes, result.geometries, filename).map((node) => visit(node, new THREE.Matrix4())) };
   return { parts, root };
 }
 

@@ -146,4 +146,5 @@ button { color: inherit; font: inherit; }
   .brand { font-size: 0; gap: 0; }
   .file-actions { gap: 6px; }
   .open-button { padding: 0 8px; }
+  .file-actions .share-button { padding: 0 7px; font-size: 12px; }
 }

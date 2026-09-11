@@ -5,11 +5,14 @@ import { CadClient } from "./cad-client.js";
 import { setupSelection } from "./selection.js";
 import { Drive, readShare, shareUrl } from "./drive.js";
 import { setupSharing } from "./share.js";
+import { downloadFile } from "./download.js";
 import "./style.css";
 
 const app = document.querySelector("#app");
 const host = document.querySelector("#canvas");
 const openButton = document.querySelector("#open");
+const downloadButton = document.querySelector("#download");
+let currentFile;
 const fileInput = document.querySelector("#file-input");
 const empty = document.querySelector("#empty");
 const loading = document.querySelector("#loading");
@@ -277,6 +280,7 @@ function setBusy(value) {
   busy = value;
   loading.hidden = !value;
   openButton.disabled = value;
+  downloadButton.disabled = value || !currentFile;
   sharing.setLoading(value);
   edgesButton.disabled = value || !surfaces.children.length;
   document.querySelector("#measure").disabled = value || !surfaces.children.length;
@@ -298,7 +302,7 @@ async function openFile(file, sharedUrl = "") {
   try {
     nextCad = new CadClient();
     const result = await nextCad.request("open", { buffer: await file.arrayBuffer() });
-    const next = buildParts(result);
+    const next = buildParts(result, file.name);
 
     selection.reset();
     cad?.close();
@@ -328,6 +332,7 @@ async function openFile(file, sharedUrl = "") {
     statusDot.classList.add("ready");
     stats.innerHTML = `${size}<span></span>${Math.round(triangles).toLocaleString()} triangles`;
     stats.hidden = false;
+    currentFile = file;
     sharing.setFile(file, sharedUrl);
     if (!sharedUrl && window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
   } catch (error) {
@@ -341,6 +346,10 @@ async function openFile(file, sharedUrl = "") {
 }
 
 openButton.addEventListener("click", () => fileInput.click());
+downloadButton.addEventListener("click", () => {
+  if (!currentFile || busy) return;
+  downloadFile(currentFile);
+});
 empty.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => {
   const file = fileInput.files?.[0];
