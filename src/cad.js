@@ -1,4 +1,4 @@
-import { repairCone } from "./cad-mesh.js";
+import { repairFace } from "./cad-mesh.js";
 
 const options = {
   linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio",
@@ -14,7 +14,7 @@ export function openCad(occt, bytes, display = {}) {
   try {
     for (const geometry of result.geometries) {
       const handle = result.exactGeometryBindings.find((binding) => binding.geometryId === geometry.id).exactShapeHandle;
-      for (const face of geometry.faces) if (!face.indexCount) repairCone(occt, result.exactModelId, handle, geometry, face);
+      for (const face of geometry.faces) if (!face.indexCount) repairFace(occt, result.exactModelId, handle, geometry, face);
     }
   } catch (error) {
     occt.ReleaseExactModel(result.exactModelId);

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import OcctJS from "@tx-code/occt-js";
 import * as THREE from "three";
-import { repairCone } from "../src/cad-mesh.js";
+import { repairCone, repairFace } from "../src/cad-mesh.js";
 import { sectionShape } from "../src/section-shape.js";
 
 test("a missing conical face is rebuilt from CAD boundaries without losing face IDs or filling its interior", async () => {
@@ -43,4 +43,49 @@ test("a missing conical face is rebuilt from CAD boundaries without losing face 
     assert.equal(shape.loops, 1);
     assert.ok(shape.fill.length > 0);
   } finally { occt.ReleaseExactModel(model.exactModelId); }
+});
+
+test("zero-area CAD faces require no display triangles", () => {
+  let queried = false;
+  const occt = {
+    MeasureExactFaceArea: () => ({ ok: true, value: 0 }),
+    GetExactGeometryType() { queried = true; throw new Error("Must not repair a collapsed face"); },
+  };
+  const face = { id: 2, indexCount: 0 };
+  repairFace(occt, 1, 1, {}, face);
+  assert.equal(face.indexCount, 0);
+  assert.equal(queried, false);
+  assert.throws(() => repairFace({
+    MeasureExactFaceArea: () => ({ ok: true, value: 1 }),
+    GetExactGeometryType: () => ({ ok: true, family: "torus" }),
+  }, 1, 1, {}, face), /triangulation is missing/, "nonzero missing surfaces are not silently ignored");
+});
+
+test("missing planar faces retain holes, normals and face mapping", () => {
+  const face = { id: 10, firstIndex: 0, indexCount: 0 };
+  const loops = [
+    [[-2, -2, 0], [2, -2, 0], [2, 2, 0], [-2, 2, 0], [-2, -2, 0]],
+    [[-1, -1, 0], [-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]],
+  ];
+  const geometry = {
+    positions: new Float32Array(), normals: new Float32Array(), indices: new Uint32Array(),
+    triangleToFaceMap: new Int32Array(), faces: [face],
+    edges: loops.map((points) => ({ ownerFaceIds: [10], points: new Float32Array(points.flat()) })),
+  };
+  const occt = {
+    MeasureExactFaceArea: () => ({ ok: true, value: 12 }),
+    GetExactGeometryType: () => ({ ok: true, family: "plane" }),
+    EvaluateExactFaceNormal: () => ({ ok: true, localNormal: [0, 0, -1] }),
+  };
+  repairFace(occt, 1, 1, geometry, face);
+  let area = 0;
+  for (let i = 0; i < geometry.indices.length; i += 3) {
+    const [a, b, c] = Array.from(geometry.indices.slice(i, i + 3)).map((id) => new THREE.Vector3().fromArray(geometry.positions, id * 3));
+    const cross = b.sub(a).cross(c.sub(a));
+    assert.ok(cross.z < 0);
+    area += cross.length() / 2;
+  }
+  assert.equal(area, 12);
+  assert.ok(geometry.triangleToFaceMap.every((id) => id === 10));
+  assert.equal(face.indexCount, geometry.indices.length);
 });
