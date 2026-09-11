@@ -56,7 +56,7 @@ button { color: inherit; font: inherit; }
 .share-panel p { margin: 0 20px 0 0; line-height: 1.5; overflow-wrap: anywhere; }
 .share-panel input { width: 100%; margin-top: 12px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; font: inherit; }
 .share-panel a { display: inline-block; margin-top: 10px; color: var(--blue); }
-.share-panel .privacy-link { display: block; font-size: 12px; }
+.share-links { display: flex; flex-wrap: wrap; gap: 0 14px; font-size: 12px; }
 #close-share { position: absolute; right: 8px; top: 8px; border: 0; background: none; font-size: 20px; cursor: pointer; }
 
 .view-tools { position: absolute; z-index: 3; top: 82px; right: 14px; display: flex; flex-direction: column; padding: 5px; border: 1px solid rgba(255,255,255,.78); border-radius: 11px; background: var(--panel); box-shadow: 0 8px 28px rgba(30,37,44,.08); backdrop-filter: blur(20px); }
