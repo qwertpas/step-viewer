@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { axisPosition, cutBounds, pickSurfaces, worldPlane } from "./section-math.js";
+import { clearBodyStencil } from "./section-stencil.js";
 
 export function capMaterial(part) {
   let index = 0;
@@ -281,8 +282,10 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
         const fill = new THREE.Mesh(capGeometry, capMaterial(part));
         fill.renderOrder = partIndex * 3 + 3;
         fill.userData.part = part;
-        // The bounded fill replaces stencil values with zero, including depth-failed pixels.
-        // No full-screen clear is needed between bodies.
+        // Retained surfaces can leave stencil outside the cut rectangle. Clear the whole
+        // body's screen footprint so another body's fill cannot reuse those pixels.
+        fill.frustumCulled = false;
+        fill.onAfterRender = (renderer, scene, camera) => clearBodyStencil(renderer, camera, bounds);
         cap.add(fill);
         cuts.push({ part, bounds, passes, fill, crosses: false });
       }

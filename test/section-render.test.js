@@ -65,14 +65,22 @@ test("only intersected bodies render section passes; Flip and Clear restore cull
     assert.equal(parts[2].surface.layers.mask, 2);
     assert.equal(parts[2].surface.visible, true);
     let clears = 0;
+    const renderer = {
+      getViewport: (target) => target.set(0, 0, 100, 100),
+      getScissor: (target) => target.set(0, 0, 100, 100),
+      getScissorTest: () => false,
+      setScissor() {}, setScissorTest() {},
+      clearStencil() { clears++; },
+    };
     for (const fill of fills.filter((item) => item.visible)) {
       assert.ok(fill.scale.x < 2.02 && fill.scale.y < 2.02);
       assert.equal(fill.material.color.getHex(), fill.userData.part.surface.material[0].color.getHex());
-      fill.onAfterRender({ clearStencil() { clears++; } });
+      assert.equal(fill.frustumCulled, false);
+      fill.onAfterRender(renderer, scene, camera);
       const preceding = passes.filter((item) => item.userData.part === fill.userData.part);
       assert.deepEqual(preceding.map((item) => item.renderOrder), [fill.renderOrder - 2, fill.renderOrder - 1]);
     }
-    assert.equal(clears, 0);
+    assert.equal(clears, 2);
     elements.get("#section-flip").events.click();
     section.update();
     assert.equal(parts[2].surface.layers.mask, 1);
