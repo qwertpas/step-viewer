@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { buildParts, visibleBounds } from "./model.js";
+import { visibilityHistory, visibilityKey } from "./visibility.js";
 import { CadClient } from "./cad-client.js";
 import { setupSelection } from "./selection.js";
 import { setupSection } from "./section.js";
@@ -156,15 +157,18 @@ function updateTreeStates() {
   }
 }
 
-function setPartsVisible(indices, visible) {
-  for (const index of indices) {
-    const part = partObjects[index];
-    if (!part) continue;
-    part.surface.visible = visible;
-    part.edge.visible = visible;
-  }
+const visibility = visibilityHistory(() => partObjects, () => {
   updateTreeStates();
   selection.visibilityChanged();
+  redraw();
+});
+const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+window.addEventListener("keydown", (event) => {
+  if (!busy) visibilityKey(event, visibility, mac);
+});
+
+function setPartsVisible(indices, visible) {
+  visibility.set(indices, visible);
 }
 
 function makeTreeRow(node, depth, fallbackName) {
@@ -306,6 +310,7 @@ async function openFile(file, sharedUrl = "") {
 
     selection.reset();
     section.reset();
+    visibility.clear();
     cad?.close();
     cad = nextCad;
     nextCad = null;
