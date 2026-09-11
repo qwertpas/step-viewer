@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { buildParts, visibleBounds } from "./model.js";
 import { CadClient } from "./cad-client.js";
 import { setupSelection } from "./selection.js";
+import { setupSection } from "./section.js";
 import { Drive, readShare, shareUrl } from "./drive.js";
 import { setupSharing } from "./share.js";
 import { downloadFile } from "./download.js";
@@ -40,7 +41,8 @@ const camera = new THREE.PerspectiveCamera(35, host.clientWidth / host.clientHei
 camera.up.set(0, 0, 1);
 camera.position.set(180, -220, 160);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
+renderer.localClippingEnabled = true;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(host.clientWidth, host.clientHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -88,14 +90,24 @@ function redraw() {
     frame = 0;
     controls.update();
     selection.update();
+    section.update();
     renderer.render(scene, camera);
   });
 }
 const selection = setupSelection({
   scene, camera, canvas: renderer.domElement, getParts: () => partObjects, redraw,
+  getPlanes: () => section.planes, blocked: () => section.editing,
   measure: (refs) => cad.request("measure", { refs }),
   setVisible: setPartsVisible,
   onSelect: (index) => treeEntries.forEach((entry) => entry.row.classList.toggle("selected", entry.indices.includes(index))),
+});
+const section = setupSection({
+  scene, camera, canvas: renderer.domElement, controls, getParts: () => partObjects, redraw,
+  queryPlane: (ref) => cad.request("plane", { ref }),
+  onEdit: (editing) => {
+    if (editing) selection.reset();
+    document.querySelector("#measure").disabled = editing || busy || !partObjects.length;
+  },
 });
 
 function dispose(group) {
@@ -124,19 +136,6 @@ function fitModel() {
   camera.updateProjectionMatrix();
   grid.position.z = box.min.z - Math.max(dimensions.z * 0.01, 0.01);
   controls.update();
-}
-
-function setView(direction) {
-  if (!surfaces.children.length) return;
-  const box = visibleBounds(partObjects);
-  if (box.isEmpty()) return;
-  const center = box.getCenter(new THREE.Vector3());
-  const distance = camera.position.distanceTo(controls.target);
-  controls.target.copy(center);
-  camera.position.copy(center).addScaledVector(direction.normalize(), distance);
-  camera.up.set(0, 0, 1);
-  controls.update();
-  fitModel();
 }
 
 function collectMeshIndices(node) {
@@ -283,7 +282,8 @@ function setBusy(value) {
   downloadButton.disabled = value || !currentFile;
   sharing.setLoading(value);
   edgesButton.disabled = value || !surfaces.children.length;
-  document.querySelector("#measure").disabled = value || !surfaces.children.length;
+  document.querySelector("#measure").disabled = value || !surfaces.children.length || section.editing;
+  document.querySelector("#section").disabled = value || !surfaces.children.length;
 }
 
 async function openFile(file, sharedUrl = "") {
@@ -305,6 +305,7 @@ async function openFile(file, sharedUrl = "") {
     const next = buildParts(result, file.name);
 
     selection.reset();
+    section.reset();
     cad?.close();
     cad = nextCad;
     nextCad = null;
@@ -318,6 +319,7 @@ async function openFile(file, sharedUrl = "") {
       triangles += part.triangles;
     });
     buildComponentTree(next.root, partObjects);
+    section.setParts();
     fileName.textContent = file.name;
     fileName.title = file.name;
     outlines.visible = edgesButton.classList.contains("active");
@@ -358,17 +360,6 @@ fileInput.addEventListener("change", () => {
 });
 
 document.querySelector("#fit").addEventListener("click", fitModel);
-document.querySelectorAll("[data-view]").forEach((button) => {
-  button.addEventListener("click", () => {
-    const directions = {
-      front: new THREE.Vector3(0, -1, 0),
-      right: new THREE.Vector3(1, 0, 0),
-      // A tiny offset avoids OrbitControls' singularity at the exact Z pole.
-      top: new THREE.Vector3(0, -0.0001, 1),
-    };
-    setView(directions[button.dataset.view]);
-  });
-});
 
 edgesButton.addEventListener("click", () => {
   const enabled = edgesButton.classList.toggle("active");

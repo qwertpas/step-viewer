@@ -35,15 +35,25 @@
       </aside>
 
       <aside class="view-tools" aria-label="View controls">
-        <button id="fit" title="Fit model" aria-label="Fit model">⌗</button>
-        <span></span>
-        <button data-view="front" title="Front view">F</button>
-        <button data-view="right" title="Right view">R</button>
-        <button data-view="top" title="Top view">T</button>
+        <button id="fit" title="Fit model" aria-label="Fit model">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/>
+            <rect x="8" y="8" width="8" height="8" rx="1"/>
+          </svg>
+        </button>
         <span></span>
         <button id="measure" title="Measure exact CAD geometry (M)" aria-label="Measure" aria-pressed="false" disabled>M</button>
+        <button id="section" title="Section analysis" aria-label="Section" aria-pressed="false" disabled>Section</button>
       </aside>
 
+      <aside id="section-panel" class="selection-panel" hidden>
+        <header><strong>Section analysis</strong><button id="section-done" title="Done" aria-label="Done">✓</button></header>
+        <small id="section-hint">Click a planar face</small>
+        <div id="section-fields" hidden>
+          <label class="section-offset">Offset <input id="section-offset" type="number" step="any" value="0"> mm</label>
+          <div class="section-actions"><button id="section-flip">Flip</button><button id="section-pick">Pick face</button><button id="section-clear">Clear</button></div>
+        </div>
+      </aside>
       <aside id="selection-panel" class="selection-panel" hidden aria-live="polite">
         <header><strong id="selection-title"></strong><button id="clear-selection" aria-label="Clear selection" title="Clear selection (Esc)">×</button></header>
         <div id="selection-result"></div>

@@ -33,3 +33,13 @@ export function measureCad(occt, modelId, refs) {
   if (!result.ok) throw new Error(result.message);
   return ref.kind === "edge" ? { length: result } : { area: result };
 }
+
+export function facePlane(occt, modelId, ref) {
+  const args = [modelId, ref.handle, "face", ref.id];
+  const type = occt.GetExactGeometryType(...args);
+  if (!type.ok) throw new Error(type.message);
+  if (type.family !== "plane") return { planar: false };
+  const result = occt.EvaluateExactFaceNormal(...args, ref.point);
+  if (!result.ok) throw new Error(result.message);
+  return { planar: true, point: result.localPoint, normal: result.localNormal };
+}

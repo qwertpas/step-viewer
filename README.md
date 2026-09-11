@@ -25,6 +25,12 @@ Measurements use retained OpenCascade B-rep faces and curves, **not triangle dis
 
 Tessellation is used only for display and picking. Geometry is shared across assembly instances; adjacent same-color draw groups are merged without changing topology IDs. CAD edges are imported directly. The viewer redraws on changes, not continuously while idle.
 
+### Section analysis
+
+Click **Section**, then a planar face. Drag the arrow to move the cut parallel to that face, or enter an offset in millimeters. **Flip** keeps the opposite side; **Pick face** changes the plane. **Done** or **Esc** hides the controls and keeps the cut; **Clear** restores the full model. Opening another file clears the section.
+
+The plane uses the original CAD face normal. Curved faces cannot define a section. Cut surfaces are display-only caps, not selectable CAD faces. Measurements on retained faces still describe the original CAD geometry. Sections do not modify downloaded files or carry over in share links.
+
 The CAD dependency is pinned to upstream commit `ad8ffb6007eb3fd25179232f291b626d6e78a195` because the npm release does not yet include the exact-model APIs. Its bundled Wasm is used without a custom build.
 
 Development: `npm install`, then `npm run dev`. Verify with `npm test` and `npm run build`.

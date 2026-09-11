@@ -1,0 +1,47 @@
+import * as THREE from "three";
+
+export function worldPlane(data, transform) {
+  return new THREE.Plane().setFromNormalAndCoplanarPoint(
+    new THREE.Vector3(...data.normal).normalize(), new THREE.Vector3(...data.point),
+  ).applyMatrix4(new THREE.Matrix4().fromArray(transform));
+}
+
+export function axisPosition(ray, origin, normal) {
+  const direction = ray.direction.dot(normal);
+  const denominator = 1 - direction * direction;
+  if (denominator < 0.00001) return null;
+  const delta = origin.clone().sub(ray.origin);
+  return (direction * delta.dot(ray.direction) - delta.dot(normal)) / denominator;
+}
+
+export function kept(point, planes) {
+  return planes.every((plane) => plane.distanceToPoint(point) >= -1e-6);
+}
+
+// Clipping is a shader effect: raycasting must also reject removed surfaces and opaque cut caps.
+export function pickSurfaces(ray, parts, planes) {
+  const objects = parts.filter((part) => part.surface.visible).map((part) => part.surface);
+  if (!planes.length) return { hit: ray.intersectObjects(objects, false)[0], limit: Infinity };
+  const sides = new Map();
+  for (const object of objects) for (const material of object.material) {
+    if (!sides.has(material)) sides.set(material, material.side);
+    material.side = THREE.DoubleSide;
+  }
+  let hits;
+  try { hits = ray.intersectObjects(objects, false); }
+  finally { for (const [material, side] of sides) material.side = side; }
+  const facing = (hit) => hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).dot(ray.ray.direction);
+  let limit = Infinity;
+  const crossing = ray.ray.intersectPlane(planes[0], new THREE.Vector3());
+  if (crossing) {
+    const distance = crossing.distanceTo(ray.ray.origin);
+    const seen = new Set();
+    for (const hit of hits) {
+      if (hit.distance <= distance + 1e-6 || seen.has(hit.object)) continue;
+      seen.add(hit.object);
+      // An exit face as the first crossing after the plane means the cut lies inside this solid.
+      if (facing(hit) > 0) { limit = distance; break; }
+    }
+  }
+  return { hit: hits.find((hit) => hit.distance <= limit + 1e-6 && kept(hit.point, planes) && facing(hit) < 0), limit };
+}

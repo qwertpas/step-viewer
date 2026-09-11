@@ -61,8 +61,13 @@ button { color: inherit; font: inherit; }
 
 .view-tools { position: absolute; z-index: 3; top: 82px; right: 14px; display: flex; flex-direction: column; padding: 5px; border: 1px solid rgba(255,255,255,.78); border-radius: 11px; background: var(--panel); box-shadow: 0 8px 28px rgba(30,37,44,.08); backdrop-filter: blur(20px); }
 .view-tools button { width: 34px; height: 32px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; font-size: 11px; font-weight: 650; }
-.view-tools button:first-child { font-size: 21px; font-weight: 400; line-height: 1; }
+#fit { display: grid; place-items: center; }
 .view-tools button:hover { background: rgba(30,36,42,.07); }
+#section { width: 48px; font-size: 10px; }
+.section-offset { display: flex; align-items: center; gap: 8px; margin: 12px 0; font-size: 12px; }
+.section-offset input { width: 130px; padding: 7px; border: 1px solid var(--line); border-radius: 6px; }
+.section-actions { display: flex; gap: 8px; }
+.section-actions button { font-size: 12px; padding: 7px 12px; background: rgba(30,36,42,.07); border-radius: 6px; }
 .view-tools span { height: 1px; margin: 5px 4px; background: var(--line); }
 
 .components {

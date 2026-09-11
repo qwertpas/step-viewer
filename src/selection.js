@@ -1,6 +1,7 @@
 import * as THREE from "three";
+import { kept, pickSurfaces } from "./section-math.js";
 
-export function setupSelection({ scene, camera, canvas, getParts, measure, setVisible, onSelect, redraw }) {
+export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blocked, measure, setVisible, onSelect, redraw }) {
   const button = document.querySelector("#measure");
   const panel = document.querySelector("#selection-panel");
   const heading = document.querySelector("#selection-title");
@@ -57,6 +58,7 @@ export function setupSelection({ scene, camera, canvas, getParts, measure, setVi
       }));
     }
     object.applyMatrix4(new THREE.Matrix4().fromArray(part.transform));
+    object.material.clippingPlanes = getPlanes();
     object.renderOrder = 2;
     group.add(object);
   }
@@ -74,6 +76,7 @@ export function setupSelection({ scene, camera, canvas, getParts, measure, setVi
     dimensions.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x145bd7, depthTest: false })));
     const dots = new THREE.Points(geometry.clone(), new THREE.PointsMaterial({ color: 0x145bd7, size: 7, sizeAttenuation: false, depthTest: false }));
     dimensions.add(dots);
+    dimensions.children.forEach((item) => { item.material.clippingPlanes = getPlanes(); });
     anchor = points[0].clone().add(points[1]).multiplyScalar(0.5);
     label.textContent = text;
     label.hidden = false;
@@ -162,13 +165,13 @@ export function setupSelection({ scene, camera, canvas, getParts, measure, setVi
     pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
     ray.setFromCamera(pointer, camera);
     const visible = parts.filter((part) => part.surface.visible);
-    const hit = ray.intersectObjects(visible.map((part) => part.surface), false)[0];
+    const { hit, limit } = pickSurfaces(ray, parts, getPlanes());
     if (!measuring) return hit ? { part: hit.object.userData.partIndex, kind: "part" } : null;
     const distance = hit?.distance || camera.position.distanceTo(new THREE.Box3().setFromObject(highlights).getCenter(new THREE.Vector3()));
     ray.params.Line.threshold = Math.max(distance, 1) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / rect.height * 6;
     const candidates = hit ? [parts[hit.object.userData.partIndex].edge] : visible.map((part) => part.edge);
     const edgeHits = ray.intersectObjects(candidates, false);
-    const edgeHit = edgeHits.find((edge) => !hit || edge.distance <= hit.distance + ray.params.Line.threshold * 2);
+    const edgeHit = edgeHits.find((edge) => kept(edge.point, getPlanes()) && edge.distance <= limit + ray.params.Line.threshold && (!hit || edge.distance <= hit.distance + ray.params.Line.threshold * 2));
     if (edgeHit) {
       const part = edgeHit.object.userData.partIndex;
       return { part, kind: "edge", id: parts[part].edgeIds[Math.floor(edgeHit.index / 2)] };
@@ -179,10 +182,10 @@ export function setupSelection({ scene, camera, canvas, getParts, measure, setVi
   }
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (event.button === 0) down = { x: event.clientX, y: event.clientY };
+    if (!blocked() && event.button === 0) down = { x: event.clientX, y: event.clientY };
   });
   canvas.addEventListener("pointerup", (event) => {
-    if (!down || event.button !== 0) return;
+    if (blocked() || !down || event.button !== 0) return;
     const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
     down = null;
     if (moved > 4 || button.disabled) return;
@@ -203,9 +206,10 @@ export function setupSelection({ scene, camera, canvas, getParts, measure, setVi
   });
   canvas.addEventListener("pointercancel", () => { down = null; });
   canvas.addEventListener("pointermove", (event) => {
-    if (event.buttons || button.disabled || moveFrame) return;
+    if (blocked() || event.buttons || button.disabled || moveFrame) return;
     moveFrame = requestAnimationFrame(() => {
       moveFrame = 0;
+      if (blocked()) return;
       const picked = pick(event, mode || event.shiftKey);
       const key = JSON.stringify(picked);
       if (key === hovered) return;
@@ -218,6 +222,7 @@ export function setupSelection({ scene, camera, canvas, getParts, measure, setVi
   button.addEventListener("click", () => setMode(!mode));
   document.querySelector("#clear-selection").addEventListener("click", clear);
   window.addEventListener("keydown", (event) => {
+    if (blocked()) return;
     if (event.target.closest("input, textarea, select, [contenteditable='true']") || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
     if (event.key === "Escape") clear();
     if (button.disabled) return;
@@ -244,7 +249,7 @@ export function setupSelection({ scene, camera, canvas, getParts, measure, setVi
     update() {
       if (!anchor) return;
       const point = anchor.clone().project(camera);
-      label.hidden = point.z < -1 || point.z > 1 || Math.abs(point.x) > 1 || Math.abs(point.y) > 1;
+      label.hidden = !kept(anchor, getPlanes()) || point.z < -1 || point.z > 1 || Math.abs(point.x) > 1 || Math.abs(point.y) > 1;
       const rect = canvas.getBoundingClientRect();
       label.style.left = `${rect.left + (point.x + 1) * rect.width / 2}px`;
       label.style.top = `${rect.top + (1 - point.y) * rect.height / 2 - 12}px`;
