@@ -23,7 +23,7 @@ test("Share uploads only on click, copies once ready, and preserves links across
   const drive = {
     clientId: "client", apiKey: "key", prepare: async () => {},
     connect: async () => { connects++; },
-    share: async () => { uploads++; return { id: "cad123" }; },
+    share: async () => { uploads++; return { id: "cad123", folderId: "folder1" }; },
   };
   try {
     const sharing = setupSharing(drive);
@@ -34,7 +34,7 @@ test("Share uploads only on click, copies once ready, and preserves links across
     assert.equal(uploads, 1);
     assert.match(nodes.get("#share-message").textContent, /Link ready/);
     assert.equal(nodes.get("#share-link").value, "https://example.com/viewer/#file=cad123");
-    assert.equal(nodes.get("#share-drive").href, "https://drive.google.com/file/d/cad123/view");
+    assert.equal(nodes.get("#share-drive").href, "https://drive.google.com/drive/folders/folder1");
     assert.equal(nodes.get("#share-drive").hidden, false);
     denyClipboard = false;
     await button.handlers.click();
@@ -49,7 +49,7 @@ test("Share uploads only on click, copies once ready, and preserves links across
     await button.handlers.click();
     assert.equal(connects, 1, "recipient can copy the existing link without signing in");
     assert.equal(copied, "https://example.com/viewer/#file=recipient&resourcekey=key123");
-    assert.equal(nodes.get("#share-drive").href, "https://drive.google.com/file/d/recipient/view?resourcekey=key123");
+    assert.equal(nodes.get("#share-drive").hidden, true, "recipients cannot access the sender's private folder");
     sharing.setFile(new File(["new"], "new.step"));
     assert.equal(nodes.get("#share-drive").hidden, true);
     drive.connect = async () => { throw new Error("Sign-in cancelled"); };

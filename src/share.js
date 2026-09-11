@@ -1,4 +1,4 @@
-import { readShare, shareUrl } from "./drive.js";
+import { shareUrl } from "./drive.js";
 
 export function setupSharing(drive) {
   const button = document.querySelector("#share");
@@ -14,7 +14,7 @@ export function setupSharing(drive) {
 
   function update() {
     button.disabled = !file || loading || busy;
-    button.textContent = busy ? "Sharing…" : "Copy share link";
+    button.textContent = busy ? "Sharing…" : "Share";
   }
 
   function report(text) {
@@ -34,19 +34,16 @@ export function setupSharing(drive) {
         await drive.connect();
         const shared = await drive.share(file, report);
         url = shareUrl(window.location.href, shared);
+        driveLink.href = `https://drive.google.com/drive/folders/${encodeURIComponent(shared.folderId)}`;
+        driveLink.hidden = false;
       }
       link.value = url;
       link.hidden = false;
-      const shared = readShare(new URL(url).hash);
-      const driveUrl = new URL(`https://drive.google.com/file/d/${shared.id}/view`);
-      if (shared.resourceKey) driveUrl.searchParams.set("resourcekey", shared.resourceKey);
-      driveLink.href = driveUrl.href;
-      driveLink.hidden = false;
       try {
         await navigator.clipboard.writeText(url);
         report("Link copied. Anyone with the link can view and download this CAD.");
       } catch {
-        report("Link ready. Click Copy share link again, or copy the link below.");
+        report("Link ready. Click Share again, or copy the link below.");
         link.focus();
         link.select();
       }

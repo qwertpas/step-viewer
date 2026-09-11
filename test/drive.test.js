@@ -38,7 +38,7 @@ test("sharing creates a private folder, uploads original bytes, and checks anony
   } });
   drive.token = "sender-token";
   const progress = [];
-  assert.deepEqual(await drive.share(file, (text) => progress.push(text)), { id: "cad123", resourceKey: "resource1" });
+  assert.deepEqual(await drive.share(file, (text) => progress.push(text)), { id: "cad123", resourceKey: "resource1", folderId: "folder1" });
   assert.equal(responses.length, 0);
   assert.equal(JSON.parse(calls[1].body).name, "STEP Viewer Shares");
   assert.deepEqual(JSON.parse(calls[3].body).parents, ["folder1"]);

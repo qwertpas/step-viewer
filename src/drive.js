@@ -30,7 +30,7 @@ export function shareUrl(base, file) {
 async function checked(response) {
   if (response.ok) return response;
   const error = new Error(response.status === 401
-    ? "Google connection expired. Click Copy share link to reconnect."
+    ? "Google connection expired. Click Share to reconnect."
     : response.status === 404
       ? "This shared file is unavailable. It may have been deleted or made private."
       : response.status === 403
@@ -74,7 +74,7 @@ export class Drive {
   connect() {
     if (!this.clientId || !this.apiKey) return Promise.reject(new Error("Sharing needs one-time Google setup by the site owner. See the setup guide."));
     if (this.token && Date.now() < this.expires) return Promise.resolve();
-    if (!this.google) return Promise.reject(new Error("Google sign-in is loading. Click Copy share link again in a moment."));
+    if (!this.google) return Promise.reject(new Error("Google sign-in is loading. Click Share again in a moment."));
     return new Promise((resolve, reject) => {
       const client = this.google.initTokenClient({
         client_id: this.clientId,
@@ -82,7 +82,7 @@ export class Drive {
         include_granted_scopes: false,
         callback: (response) => {
           if (response.error || !response.access_token || !this.google.hasGrantedAllScopes(response, scope)) {
-            reject(new Error("Google Drive access was not granted. Click Copy share link to try again."));
+            reject(new Error("Google Drive access was not granted. Click Share to try again."));
             return;
           }
           this.token = response.access_token;
@@ -91,7 +91,7 @@ export class Drive {
         },
         error_callback: (error) => reject(new Error(error.type === "popup_closed"
           ? "Google sign-in was cancelled. Nothing was shared."
-          : "Allow Google's sign-in popup, then click Copy share link again.")),
+          : "Allow Google's sign-in popup, then click Share again.")),
       });
       client.requestAccessToken({ prompt: "" });
     });
@@ -156,7 +156,7 @@ export class Drive {
     // Check without the sender's token: only copy a link when anonymous access works.
     report("Checking link access…");
     await this.publicFile(shared);
-    return shared;
+    return { ...shared, folderId: folder };
   }
 
   async publicRequest(file, params) {

@@ -8,7 +8,7 @@ CAD processing is done on your machine. The viewer is a static site with no app 
 
 ### Share CAD
 
-Drop a STEP file and click **Copy share link**. Google prompts for sign-in/consent when needed; the viewer automatically saves the copy in **STEP Viewer Shares** and enables read-only access for anyone with the link. Recipients open the viewer link and the CAD loads without an account. The entire original file is shared, including hidden parts. Repeated shares reuse identical file content.
+Drop a STEP file and click **Share**. Google prompts for sign-in/consent when needed; the viewer automatically saves the copy in **STEP Viewer Shares** and enables read-only access for anyone with the link. Recipients open the viewer link and the CAD loads without an account. The entire original file is shared, including hidden parts. Repeated shares reuse identical file content.
 
 The site owner must first complete the [one-time Google setup](GOOGLE-DRIVE.md). Normal local viewing works without configuration. Google may show an account popup again after its short-lived browser token expires; perpetual silent connection is not supported on a static-only site. Sharing supports files up to 250 MB and is subject to Drive limits and sharing policies.
 
