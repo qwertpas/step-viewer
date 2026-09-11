@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test test/*.test.js",
     "dev": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
-    "occt-import-js": "0.0.23",
+    "@tx-code/occt-js": "0.1.7",
     "three": "0.185.1"
   },
   "devDependencies": {

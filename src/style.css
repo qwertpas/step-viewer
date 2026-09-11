@@ -13,7 +13,9 @@
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button { color: inherit; font: inherit; }
-#app { position: relative; min-height: 520px; }
+#app { position: relative; }
+#canvas { position: absolute; }
+.has-model:not(.panel-collapsed) #canvas { left: 318px; width: calc(100% - 318px); }
 #canvas, #canvas canvas { display: block; width: 100%; height: 100%; }
 #canvas canvas { outline: none; }
 [hidden] { display: none !important; }
@@ -60,7 +62,7 @@ button { color: inherit; font: inherit; }
 .tree-toolbar button:hover { color: var(--ink); background: rgba(30,36,42,.07); }
 .tree-toolbar span { flex: 1; }
 .component-tree { max-height: calc(100vh - 229px); overflow: auto; padding: 6px; scrollbar-color: #b5bac0 transparent; scrollbar-width: thin; }
-.component-row { display: flex; align-items: center; height: 30px; padding: 0 5px 0 calc(2px + var(--depth) * 16px); border-radius: 6px; }
+.component-row { display: flex; align-items: center; min-width: calc(180px + var(--depth) * 16px); height: 30px; padding: 0 5px 0 calc(2px + var(--depth) * 16px); border-radius: 6px; }
 .component-row:hover { background: rgba(30,36,42,.055); }
 .branch-button, .visibility-button { display: grid; flex: 0 0 auto; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
 .branch-button { width: 19px; color: #747a81; font-size: 14px; }
@@ -108,6 +110,7 @@ button { color: inherit; font: inherit; }
 .drop-layer strong { font-size: 16px; }
 
 @media (max-width: 680px) {
+  .has-model:not(.panel-collapsed) #canvas { left: 0; width: 100%; }
   .topbar { inset: 8px 8px auto; grid-template-columns: 1fr auto; }
   .file-name, .mouse-help { display: none; }
   .view-tools { top: 72px; right: 8px; }

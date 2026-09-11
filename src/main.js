@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import occtImport from "occt-import-js";
+import { buildParts, visibleBounds } from "./model.js";
 import "./style.css";
 
 const app = document.querySelector("#app");
@@ -26,7 +26,6 @@ const collapseComponentsButton = document.querySelector("#collapse-components");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe8eaed);
-scene.fog = new THREE.Fog(0xe8eaed, 900, 2200);
 
 const camera = new THREE.PerspectiveCamera(35, host.clientWidth / host.clientHeight, 0.01, 100000);
 camera.up.set(0, 0, 1);
@@ -85,13 +84,15 @@ function dispose(group) {
 
 function fitModel() {
   if (!surfaces.children.length) return;
-  const box = new THREE.Box3().setFromObject(surfaces);
+  const box = visibleBounds(partObjects);
+  if (box.isEmpty()) return;
   const center = box.getCenter(new THREE.Vector3());
   const dimensions = box.getSize(new THREE.Vector3());
   const radius = Math.max(dimensions.length() * 0.56, 1);
   const direction = camera.position.clone().sub(controls.target).normalize();
   controls.target.copy(center);
-  camera.position.copy(center).addScaledVector(direction, radius / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.12);
+  const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(camera.aspect, 1));
+  camera.position.copy(center).addScaledVector(direction, radius / Math.sin(halfFov) * 1.12);
   camera.near = Math.max(radius / 1000, 0.001);
   camera.far = radius * 100;
   camera.updateProjectionMatrix();
@@ -101,41 +102,15 @@ function fitModel() {
 
 function setView(direction) {
   if (!surfaces.children.length) return;
-  const center = new THREE.Box3().setFromObject(surfaces).getCenter(new THREE.Vector3());
+  const box = visibleBounds(partObjects);
+  if (box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
   const distance = camera.position.distanceTo(controls.target);
   controls.target.copy(center);
   camera.position.copy(center).addScaledVector(direction.normalize(), distance);
   camera.up.set(0, 0, 1);
   controls.update();
-}
-
-function addMesh(part, index) {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(part.attributes.position.array, 3));
-  if (part.attributes.normal) {
-    geometry.setAttribute("normal", new THREE.Float32BufferAttribute(part.attributes.normal.array, 3));
-  } else {
-    geometry.computeVertexNormals();
-  }
-  geometry.setIndex(part.index.array);
-
-  const color = part.color ? new THREE.Color(...part.color) : new THREE.Color(0xb7bcc3);
-  const surface = new THREE.Mesh(
-    geometry,
-    new THREE.MeshStandardMaterial({ color, metalness: 0.08, roughness: 0.52 }),
-  );
-  surface.name = part.name;
-  surface.userData.partIndex = index;
-  surfaces.add(surface);
-
-  const edgeGeometry = new THREE.EdgesGeometry(geometry, 25);
-  const edge = new THREE.LineSegments(
-    edgeGeometry,
-    new THREE.LineBasicMaterial({ color: 0x22272e, transparent: true, opacity: 0.36 }),
-  );
-  edge.userData.partIndex = index;
-  outlines.add(edge);
-  return { surface, edge, triangles: part.index.array.length / 3 };
+  fitModel();
 }
 
 function collectMeshIndices(node) {
@@ -149,8 +124,10 @@ function updateTreeStates() {
     const shown = entry.indices.filter((index) => partObjects[index]?.surface.visible).length;
     entry.button.classList.toggle("off", shown === 0);
     entry.button.classList.toggle("mixed", shown > 0 && shown < entry.indices.length);
-    entry.button.setAttribute("aria-pressed", String(shown > 0));
-    entry.button.title = shown ? `Hide ${entry.name}` : `Show ${entry.name}`;
+    entry.button.setAttribute("aria-pressed", shown > 0 && shown < entry.indices.length ? "mixed" : String(shown > 0));
+    const action = shown === entry.indices.length ? "Hide" : "Show";
+    entry.button.title = `${action} ${entry.name}`;
+    entry.button.setAttribute("aria-label", entry.button.title);
   }
 }
 
@@ -175,7 +152,7 @@ function makeTreeRow(node, depth, fallbackName) {
 
   const name = node.name?.trim() || fallbackName;
   const nestedChildren = node.children || [];
-  const meshChildren = !node.meshLeaf && (node.meshes || []).length > 1
+  const meshChildren = !node.meshLeaf && ((node.meshes || []).length > 1 || (node.meshes?.length && nestedChildren.length))
     ? node.meshes.map((meshIndex, index) => {
         const meshName = loadedMeshes[meshIndex]?.name?.trim();
         return {
@@ -229,7 +206,7 @@ function makeTreeRow(node, depth, fallbackName) {
     const childList = document.createElement("div");
     childList.className = "component-children";
     children.forEach((child, index) => childList.appendChild(makeTreeRow(child, depth + 1, `Component ${index + 1}`)));
-    const startsCollapsed = meshChildren.length > 0;
+    const startsCollapsed = depth >= 1;
     childList.hidden = startsCollapsed;
     item.appendChild(childList);
     branch.textContent = startsCollapsed ? "›" : "⌄";
@@ -263,59 +240,75 @@ function buildComponentTree(root, meshes) {
   componentCount.textContent = `${meshes.length} ${meshes.length === 1 ? "part" : "parts"}`;
   componentsPanel.hidden = false;
   componentsPanel.classList.remove("collapsed");
+  app.classList.add("has-model");
+  app.classList.remove("panel-collapsed");
   collapseComponentsButton.textContent = "−";
+  collapseComponentsButton.title = "Collapse panel";
+  collapseComponentsButton.setAttribute("aria-expanded", "true");
   updateTreeStates();
 }
 
-let importerPromise;
-function getImporter() {
-  const wasmUrl = new URL(`${import.meta.env.BASE_URL}occt-import-js.wasm`, window.location.href).href;
-  importerPromise ||= occtImport({ locateFile: () => wasmUrl });
-  return importerPromise;
+function readStep(buffer) {
+  const worker = new Worker(new URL("./import-worker.js", import.meta.url), { type: "module" });
+  return new Promise((resolve, reject) => {
+    worker.onmessage = ({ data }) => {
+      worker.terminate();
+      if (data.error) reject(new Error(data.error));
+      else resolve(data.result);
+    };
+    worker.onerror = () => {
+      worker.terminate();
+      reject(new Error("Could not start the STEP reader. Please reload and try again."));
+    };
+    worker.postMessage(buffer, [buffer]);
+  });
 }
 
+let busy = false;
 function setBusy(value) {
+  busy = value;
   loading.hidden = !value;
   openButton.disabled = value;
   edgesButton.disabled = value || !surfaces.children.length;
 }
 
 async function openFile(file) {
+  if (busy) return;
   if (!/\.(step|stp)$/i.test(file.name)) {
     status.textContent = "Please choose a .step or .stp file";
     return;
   }
 
-  fileName.textContent = file.name;
-  fileName.title = file.name;
   status.textContent = "Reading geometry…";
   empty.hidden = true;
   setBusy(true);
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   try {
-    const importer = await getImporter();
-    const result = importer.ReadStepFile(new Uint8Array(await file.arrayBuffer()), {
-      linearUnit: "millimeter",
-      linearDeflectionType: "bounding_box_ratio",
-      linearDeflection: 0.001,
-      angularDeflection: 0.5,
-    });
-    if (!result.success || !result.meshes.length) throw new Error("No solid geometry was found");
+    const result = await readStep(await file.arrayBuffer());
+    const next = buildParts(result);
 
     dispose(surfaces);
     dispose(outlines);
     let triangles = 0;
-    partObjects = result.meshes.map((part, index) => addMesh(part, index));
-    partObjects.forEach((part) => { triangles += part.triangles; });
-    buildComponentTree(result.root, result.meshes);
+    partObjects = next.parts;
+    partObjects.forEach((part) => {
+      surfaces.add(part.surface);
+      outlines.add(part.edge);
+      triangles += part.triangles;
+    });
+    buildComponentTree(next.root, partObjects);
+    fileName.textContent = file.name;
+    fileName.title = file.name;
     outlines.visible = edgesButton.classList.contains("active");
+    await new Promise(requestAnimationFrame);
+    camera.aspect = host.clientWidth / host.clientHeight;
     fitModel();
 
     const size = file.size > 1_000_000
       ? `${(file.size / 1_000_000).toFixed(1)} MB`
       : `${Math.max(1, Math.round(file.size / 1000))} KB`;
-    status.textContent = `${result.meshes.length} ${result.meshes.length === 1 ? "part" : "parts"}`;
+    status.textContent = `${partObjects.length} ${partObjects.length === 1 ? "part" : "parts"}`;
     statusDot.classList.add("ready");
     stats.innerHTML = `${size}<span></span>${Math.round(triangles).toLocaleString()} triangles`;
     stats.hidden = false;
@@ -352,6 +345,7 @@ document.querySelectorAll("[data-view]").forEach((button) => {
 edgesButton.addEventListener("click", () => {
   const enabled = edgesButton.classList.toggle("active");
   outlines.visible = enabled;
+  edgesButton.setAttribute("aria-pressed", String(enabled));
 });
 
 showAllButton.addEventListener("click", () => setPartsVisible(partObjects.map((_, index) => index), true));
@@ -372,8 +366,10 @@ collapseTreeButton.addEventListener("click", () => {
 });
 collapseComponentsButton.addEventListener("click", () => {
   const collapsed = componentsPanel.classList.toggle("collapsed");
+  app.classList.toggle("panel-collapsed", collapsed);
   collapseComponentsButton.textContent = collapsed ? "+" : "−";
   collapseComponentsButton.title = collapsed ? "Expand panel" : "Collapse panel";
+  collapseComponentsButton.setAttribute("aria-expanded", String(!collapsed));
 });
 
 let dragDepth = 0;
