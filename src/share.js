@@ -5,7 +5,6 @@ export function setupSharing(drive) {
   const panel = document.querySelector("#share-panel");
   const message = document.querySelector("#share-message");
   const link = document.querySelector("#share-link");
-  const setup = document.querySelector("#share-setup");
   const driveLink = document.querySelector("#share-drive");
   let file = null;
   let url = "";
@@ -27,7 +26,6 @@ export function setupSharing(drive) {
     busy = true;
     update();
     link.hidden = true;
-    setup.hidden = Boolean(drive.clientId && drive.apiKey);
     try {
       if (!url) {
         report("Connecting to Google Drive…");
