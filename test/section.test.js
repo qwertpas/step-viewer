@@ -17,7 +17,7 @@ test("cut fills retain each body's color and lighting without changing its mater
     assert.equal(cap.isMeshStandardMaterial, true);
     assert.equal(cap.roughness, source.roughness);
     assert.equal(cap.clippingPlanes, null);
-    assert.equal(cap.stencilWrite, true);
+    assert.equal(cap.stencilWrite, false);
     assert.equal(source.stencilWrite, false);
     assert.equal(source.clippingPlanes.length, 1);
     cap.dispose();

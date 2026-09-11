@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as THREE from "three";
 import { setupSection } from "../src/section.js";
 
-test("only intersected bodies render section passes; Flip and Clear restore culled bodies", async () => {
+test("solid section fills and outlines follow cut, Flip, visibility and Clear", async () => {
   const element = () => ({
     events: {}, classList: { toggle() {} }, setAttribute() {},
     addEventListener(name, action) { this.events[name] = action; },
@@ -55,38 +55,31 @@ test("only intersected bodies render section passes; Flip and Clear restore cull
     input.events.input();
     section.update();
     const fills = [];
-    const passes = [];
+    const outlines = [];
     scene.traverse((item) => {
-      if (!item.material?.stencilWrite) return;
-      (item.material.colorWrite ? fills : passes).push(item);
+      if (item.isMesh && item.userData.part) fills.push(item);
+      if (item.isLineSegments && item.renderOrder === 1) outlines.push(item);
     });
     assert.equal(fills.filter((item) => item.visible).length, 2);
-    assert.equal(passes.filter((item) => item.visible).length, 4);
+    assert.equal(outlines.filter((item) => item.visible).length, 2);
     assert.equal(parts[2].surface.layers.mask, 2);
     assert.equal(parts[2].surface.visible, true);
-    let clears = 0;
-    const renderer = {
-      getViewport: (target) => target.set(0, 0, 100, 100),
-      getScissor: (target) => target.set(0, 0, 100, 100),
-      getScissorTest: () => false,
-      setScissor() {}, setScissorTest() {},
-      clearStencil() { clears++; },
-    };
     for (const fill of fills.filter((item) => item.visible)) {
-      assert.ok(fill.scale.x < 2.02 && fill.scale.y < 2.02);
+      assert.ok(fill.geometry.getAttribute("position").count >= 6);
       assert.equal(fill.material.color.getHex(), fill.userData.part.surface.material[0].color.getHex());
-      assert.equal(fill.frustumCulled, false);
-      fill.onAfterRender(renderer, scene, camera);
-      const preceding = passes.filter((item) => item.userData.part === fill.userData.part);
-      assert.deepEqual(preceding.map((item) => item.renderOrder), [fill.renderOrder - 2, fill.renderOrder - 1]);
+      assert.equal(fill.material.stencilWrite, false);
+      assert.equal(fill.material.depthWrite, true);
+      assert.equal(fill.material.transparent, false);
     }
-    assert.equal(clears, 2);
     elements.get("#section-flip").events.click();
     section.update();
     assert.equal(parts[2].surface.layers.mask, 1);
     parts[0].surface.visible = false;
     section.update();
     assert.equal(fills.filter((item) => item.visible).length, 1);
+    parts[1].edge.visible = false;
+    section.update();
+    assert.equal(outlines.filter((item) => item.visible).length, 0);
     elements.get("#section-clear").events.click();
     assert.ok(parts.every((part) => part.surface.layers.mask === 1 && part.edge.layers.mask === 1));
     assert.equal(parts[0].surface.visible, false);

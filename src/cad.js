@@ -1,3 +1,5 @@
+import { repairCone } from "./cad-mesh.js";
+
 const options = {
   linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio",
   linearDeflection: 0.001, angularDeflection: 0.5, readColors: true, readNames: true,
@@ -8,6 +10,15 @@ export function openCad(occt, bytes, display = {}) {
   if (!result.success || !result.geometries?.length || !result.exactModelId) {
     if (result.exactModelId) occt.ReleaseExactModel(result.exactModelId);
     throw new Error("No solid CAD geometry was found");
+  }
+  try {
+    for (const geometry of result.geometries) {
+      const handle = result.exactGeometryBindings.find((binding) => binding.geometryId === geometry.id).exactShapeHandle;
+      for (const face of geometry.faces) if (!face.indexCount) repairCone(occt, result.exactModelId, handle, geometry, face);
+    }
+  } catch (error) {
+    occt.ReleaseExactModel(result.exactModelId);
+    throw error;
   }
   return result;
 }

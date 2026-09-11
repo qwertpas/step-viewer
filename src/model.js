@@ -18,6 +18,7 @@ export function buildParts(result, filename) {
         materials.push(new THREE.MeshStandardMaterial({
           color: color ? new THREE.Color(color.r, color.g, color.b) : new THREE.Color(0xb7bcc3),
           metalness: 0.08, roughness: 0.52,
+          polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
         }));
       }
       return colors.get(key);
@@ -50,13 +51,14 @@ export function buildParts(result, filename) {
     return { geometry, materials, edges, edgeIds, data: part, handle: handles.get(part.id) };
   });
   const parts = [];
-  const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x22272e, transparent: true, opacity: 0.36 });
+  const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x22272e, depthWrite: false });
   function visit(node, parent) {
     const transform = parent.clone().multiply(new THREE.Matrix4().fromArray(node.transform));
     const meshes = node.meshes.map((index, body) => {
       const source = geometries[index];
       const surface = new THREE.Mesh(source.geometry, source.materials);
       const edge = new THREE.LineSegments(source.edges, edgeMaterial);
+      edge.renderOrder = 1;
       surface.applyMatrix4(transform);
       edge.applyMatrix4(transform);
       const id = parts.length;

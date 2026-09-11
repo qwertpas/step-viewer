@@ -41,7 +41,7 @@ const camera = new THREE.PerspectiveCamera(35, host.clientWidth / host.clientHei
 camera.up.set(0, 0, 1);
 camera.position.set(180, -220, 160);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.localClippingEnabled = true;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(host.clientWidth, host.clientHeight);

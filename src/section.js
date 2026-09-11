@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { axisPosition, cutBounds, pickSurfaces, worldPlane } from "./section-math.js";
-import { clearBodyStencil } from "./section-stencil.js";
+import { sectionShape } from "./section-shape.js";
 
 export function capMaterial(part) {
   let index = 0;
@@ -12,10 +12,9 @@ export function capMaterial(part) {
   const material = part.surface.material[index].clone();
   material.clippingPlanes = null;
   material.side = THREE.DoubleSide;
-  material.stencilWrite = true;
-  material.stencilRef = 0;
-  material.stencilFunc = THREE.NotEqualStencilFunc;
-  material.stencilFail = material.stencilZFail = material.stencilZPass = THREE.ReplaceStencilOp;
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = 1;
+  material.polygonOffsetUnits = 1;
   return material;
 }
 
@@ -66,24 +65,9 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   }
   overlay.visible = arrow.visible = false;
 
-  const stencil = new THREE.Group();
-  const stencilMaterial = new THREE.MeshBasicMaterial({
-    colorWrite: false, depthWrite: false, depthTest: false, clippingPlanes: planes,
-    stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc,
-  });
-  const back = stencilMaterial.clone();
-  back.side = THREE.BackSide;
-  back.stencilFail = back.stencilZFail = back.stencilZPass = THREE.IncrementWrapStencilOp;
-  const front = stencilMaterial.clone();
-  front.side = THREE.FrontSide;
-  front.stencilFail = front.stencilZFail = front.stencilZPass = THREE.DecrementWrapStencilOp;
-  // Material.clone copies the plane list; keep the live list shared.
-  back.clippingPlanes = front.clippingPlanes = planes;
-  stencilMaterial.dispose();
   const cap = new THREE.Group();
-  const capGeometry = new THREE.PlaneGeometry(1, 1);
-  cap.visible = stencil.visible = false;
-  scene.add(stencil, cap, overlay, arrow, hover);
+  cap.visible = false;
+  scene.add(cap, overlay, arrow, hover);
 
   function sync(writeOffset = true) {
     plane.setFromNormalAndCoplanarPoint(normal.clone().multiplyScalar(flipped ? 1 : -1), origin.clone().addScaledVector(normal, offset));
@@ -102,10 +86,14 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
       cut.part.surface.layers.set(removed ? 1 : 0);
       cut.part.edge.layers.set(removed ? 1 : 0);
       if (!bounds) continue;
-      const center = bounds.getCenter(new THREE.Vector2());
-      const dimensions = bounds.getSize(new THREE.Vector2());
-      cut.fill.position.set(center.x, center.y, 0);
-      cut.fill.scale.set(dimensions.x, dimensions.y, 1);
+      const shape = sectionShape(cut.part.surface.geometry, worldToPlane.clone().multiply(cut.part.surface.matrixWorld));
+      cut.fill.geometry.dispose();
+      cut.fill.geometry = new THREE.BufferGeometry();
+      cut.fill.geometry.setAttribute("position", new THREE.BufferAttribute(shape.fill, 3));
+      cut.fill.geometry.computeVertexNormals();
+      cut.outline.geometry.dispose();
+      cut.outline.geometry = new THREE.BufferGeometry();
+      cut.outline.geometry.setAttribute("position", new THREE.BufferAttribute(shape.edges, 3));
     }
     if (writeOffset) offsetInput.value = String(Number(offset.toFixed(4)));
     redraw();
@@ -135,7 +123,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   function clear() {
     active = false;
     planes.length = 0;
-    cap.visible = stencil.visible = false;
+    cap.visible = false;
     offset = 0;
     for (const { part } of cuts) {
       part.surface.layers.set(0);
@@ -187,7 +175,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
       flipped = false;
       active = true;
       planes.splice(0, planes.length, plane);
-      cap.visible = stencil.visible = true;
+      cap.visible = true;
       sync();
       edit(true);
     } catch (error) { if (request === version) hint.textContent = error.message; }
@@ -258,36 +246,23 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
     planes,
     get editing() { return editing; },
     reset() {
-      clear(); cache.clear(); stencil.clear();
-      cap.children.forEach((mesh) => mesh.material.dispose());
+      clear(); cache.clear();
+      cap.children.forEach((mesh) => { mesh.material.dispose(); mesh.geometry.dispose(); });
       cap.clear();
       cuts.length = 0;
     },
     setParts() {
       const box = new THREE.Box3();
-      for (const [partIndex, part] of getParts().entries()) {
+      for (const part of getParts()) {
         const bounds = new THREE.Box3().setFromObject(part.surface, true);
         box.union(bounds);
-        const passes = [];
         for (const material of [...part.surface.material, part.edge.material]) material.clippingPlanes = planes;
-        for (const [index, material] of [back, front].entries()) {
-          const mesh = new THREE.Mesh(part.surface.geometry, material);
-          mesh.matrix.copy(part.surface.matrix);
-          mesh.matrixAutoUpdate = false;
-          mesh.renderOrder = partIndex * 3 + index + 1;
-          mesh.userData.part = part;
-          stencil.add(mesh);
-          passes.push(mesh);
-        }
-        const fill = new THREE.Mesh(capGeometry, capMaterial(part));
-        fill.renderOrder = partIndex * 3 + 3;
+        const fill = new THREE.Mesh(new THREE.BufferGeometry(), capMaterial(part));
         fill.userData.part = part;
-        // Retained surfaces can leave stencil outside the cut rectangle. Clear the whole
-        // body's screen footprint so another body's fill cannot reuse those pixels.
-        fill.frustumCulled = false;
-        fill.onAfterRender = (renderer, scene, camera) => clearBodyStencil(renderer, camera, bounds);
-        cap.add(fill);
-        cuts.push({ part, bounds, passes, fill, crosses: false });
+        const outline = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x22272e, depthWrite: false }));
+        outline.renderOrder = 1;
+        cap.add(fill, outline);
+        cuts.push({ part, bounds, fill, outline, crosses: false });
       }
       size = Math.max(box.getSize(new THREE.Vector3()).length(), 1);
     },
@@ -296,7 +271,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
       for (const cut of cuts) {
         const visible = cut.crosses && cut.part.surface.visible;
         cut.fill.visible = visible;
-        for (const mesh of cut.passes) mesh.visible = visible;
+        cut.outline.visible = visible && cut.part.edge.visible && cut.part.edge.parent?.visible !== false;
       }
       const scale = camera.position.distanceTo(arrow.position) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / canvas.clientHeight * 48;
       arrow.scale.setScalar(scale);
