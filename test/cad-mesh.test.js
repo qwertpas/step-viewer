@@ -25,6 +25,12 @@ test("a missing conical face is rebuilt from CAD boundaries without losing face 
     face.indexCount = 0;
     repairCone(occt, model.exactModelId, handle, geometry, face);
     assert.ok(face.indexCount > 0);
+    let displayArea = 0;
+    for (let i = face.firstIndex; i < face.firstIndex + face.indexCount; i += 3) {
+      const [a, b, c] = Array.from(geometry.indices.slice(i, i + 3)).map((id) => new THREE.Vector3().fromArray(geometry.positions, id * 3));
+      displayArea += b.sub(a).cross(c.sub(a)).length() / 2;
+    }
+    assert.ok(Math.abs(displayArea - exactArea) / exactArea < 0.02, "triangles follow the cone, not chords across its annulus");
     for (const other of geometry.faces) {
       assert.ok(other.indexCount > 0);
       assert.ok(geometry.triangleToFaceMap.slice(other.firstIndex / 3, (other.firstIndex + other.indexCount) / 3).every((id) => id === other.id));

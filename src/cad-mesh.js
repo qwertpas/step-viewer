@@ -37,8 +37,33 @@ export function repairCone(occt, modelId, handle, geometry, face) {
   }) }));
   rings.sort((a, b) => Math.abs(THREE.ShapeUtils.area(b.flat)) - Math.abs(THREE.ShapeUtils.area(a.flat)));
   if (rings.length !== 2) throw new Error(`Cannot triangulate CAD cone face ${face.id}`);
-  const triangles = THREE.ShapeUtils.triangulateShape(rings[0].flat, [rings[1].flat]);
-  const vertices = rings.flatMap((ring) => ring.points);
+  // Join corresponding angular intervals. Planar polygon triangulation can span
+  // the curved cone with long chords even when its projected annulus looks valid.
+  const rows = rings.map((ring) => ring.points.map((point, i) => ({ point, angle: Math.atan2(ring.flat[i].y, ring.flat[i].x) })).sort((a, b) => a.angle - b.angle));
+  const base = rows[0][0].angle;
+  const turn = Math.PI * 2;
+  const distance = (angle) => Math.atan2(Math.sin(angle - base), Math.cos(angle - base));
+  let nearest = 0;
+  for (let i = 1; i < rows[1].length; i++) if (Math.abs(distance(rows[1][i].angle)) < Math.abs(distance(rows[1][nearest].angle))) nearest = i;
+  rows[1] = rows[1].slice(nearest).concat(rows[1].slice(0, nearest));
+  for (const row of rows) {
+    row[0].angle = base + distance(row[0].angle);
+    for (let i = 1; i < row.length; i++) while (row[i].angle < row[i - 1].angle) row[i].angle += turn;
+  }
+  const [outer, inner] = rows;
+  const angle = (row, index) => row[index % row.length].angle + (index >= row.length ? turn : 0);
+  const triangles = [];
+  let i = 0, j = 0;
+  while (i < outer.length || j < inner.length) {
+    if (j === inner.length || (i < outer.length && angle(outer, i + 1) <= angle(inner, j + 1))) {
+      triangles.push([i % outer.length, (i + 1) % outer.length, outer.length + j % inner.length]);
+      i++;
+    } else {
+      triangles.push([i % outer.length, outer.length + (j + 1) % inner.length, outer.length + j % inner.length]);
+      j++;
+    }
+  }
+  const vertices = rows.flatMap((row) => row.map((entry) => entry.point));
   const positions = Array.from(geometry.positions);
   const normals = Array.from(geometry.normals);
   const firstVertex = positions.length / 3;
