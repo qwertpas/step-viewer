@@ -1,6 +1,6 @@
 Browser-based viewer for drag and drop `.step` and `.stp` CAD files. Great for quickly visualizing CAD files to send or receive from others.
 
-![STEP Viewer demo](assets/stepviewer.gif)
+![STEP Viewer demo](assets/demo.gif)
 
 CAD processing is done on your machine. The viewer is a static site with no app server. Optional link sharing uploads a copy directly to your Google Drive.
 
