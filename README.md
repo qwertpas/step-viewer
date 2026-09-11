@@ -1,40 +1,22 @@
+<https://qwertpas.github.io/step-viewer>
+
 Browser-based viewer for drag and drop `.step` and `.stp` CAD files. Great for quickly visualizing CAD files to send or receive from others.
 
 ![STEP Viewer demo](assets/demo.gif)
 
-CAD processing is done on your machine. The viewer is a static site with no app server. Optional link sharing uploads a copy directly to your Google Drive.
+CAD processing is done on your machine, this is a static site with no server.
 
-**Download** saves the original STEP file with its filename, whether opened locally or from a shared link. Display names and visibility changes do not modify the download. Useful CAD names are preserved; generic names such as `COMPOUND` and `Body1` are replaced with assembly paths and stable body numbers (for example, `indexMCP_DS355CLHVxCustom_v20_1_2`).
+### Sharing
 
-### Share CAD
+Sharing works by saving to your own Google Drive. When you click share, Google prompts you for sign-in/consent. The site will create a folder in your Google Drive named "STEP Viewer Shares" and upload the step file there. The site will have access to only that folder, and will enable unlisted sharing (anyone can view if they have the link). Recipients open the viewer link and the CAD loads without needing sign in. Repeated uploads of the same file name will overwrite old files, and the uploader may delete the files from their Google Drive to deprecate the link.
 
-Drop a STEP file and click **Share**. Google prompts for sign-in/consent when needed; the viewer automatically saves the copy in **STEP Viewer Shares** and enables read-only access for anyone with the link. Recipients open the viewer link and the CAD loads without an account. The entire original file is shared, including hidden parts. Repeated shares reuse identical file content.
+### Tools
 
-The site owner must first complete the [one-time Google setup](GOOGLE-DRIVE.md). Normal local viewing works without configuration. Google may show an account popup again after its short-lived browser token expires; perpetual silent connection is not supported on a static-only site. Sharing supports files up to 250 MB and is subject to Drive limits and sharing policies.
+- Click on bodies to select them, showing their name and location in the component tree.
+- **V** hides or shows selected bodies. Ctrl/Cmd+Z to undo and Ctrl/Cmd+Shift+Z to redo.
+- **Measure**: Press **M** or click "M" on the right panel. Select a circular edge or cylindrical face for diameter/radius, a straight edge for length, or a face for area. **Shift-click** another to measure minimum distance.Two supported circular entities also show center distance.
+- **Section View**: Click "Section" on the right panel then a planar face. Drag the arrow to move the cut parallel to that face, or enter an offset in millimeters. 
 
-Preserves STEP part and face colors, with assembly visibility controls. STEP parsing and exact measurements run in a worker to keep the viewer responsive.
 
-### Selection and measurements
 
-- Click a part to select it; **V** hides or restores it. Hidden parts stay selected until cleared.
-- **M** toggles measurement mode. Click a face or edge, then **Shift-click** another to measure minimum distance. Shift-click also starts measurement mode from normal selection.
-- Select a circular edge or cylindrical face for diameter/radius, a straight edge for length, or a face for area. Two supported circular entities also show center distance.
-- **Esc** clears selection. Drag rotates; Shift-drag pans.
 
-Measurements use retained OpenCascade B-rep faces and curves, **not triangle distances or fitted circles**. Results are in millimeters, subject to the source CAD model and kernel tolerances; displayed values are rounded to four decimal places. Unsupported queries report an error, never a mesh estimate.
-
-Tessellation is used only for display and picking. Geometry is shared across assembly instances; adjacent same-color draw groups are merged without changing topology IDs. CAD edges are imported directly. The viewer redraws on changes, not continuously while idle.
-
-### Section analysis
-
-Click **Section**, then a planar face. Drag the arrow to move the cut parallel to that face, or enter an offset in millimeters. **Flip** keeps the opposite side; **Pick face** changes the plane. **Done** or **Esc** hides the controls and keeps the cut; **Clear** restores the full model. Opening another file clears the section.
-
-The plane uses the original CAD face normal. Curved faces cannot define a section. Cut surfaces are display-only caps, not selectable CAD faces. Measurements on retained faces still describe the original CAD geometry. Sections do not modify downloaded files or carry over in share links.
-
-Section fills use each body's material. Only intersected bodies need cap passes, fills are bounded to each body, and completely clipped bodies are excluded from rendering without changing their visibility settings.
-
-The CAD dependency is pinned to upstream commit `ad8ffb6007eb3fd25179232f291b626d6e78a195` because the npm release does not yet include the exact-model APIs. Its bundled Wasm is used without a custom build.
-
-Development: `npm install`, then `npm run dev`. Verify with `npm test` and `npm run build`.
-
-<https://qwertpas.github.io/step-viewer/>
