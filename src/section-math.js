@@ -18,6 +18,18 @@ export function kept(point, planes) {
   return planes.every((plane) => plane.distanceToPoint(point) >= -1e-6);
 }
 
+// A conservative, body-sized rectangle on the cut plane; null for uncut bodies.
+export function cutBounds(box, plane, worldToPlane) {
+  if (!box.intersectsPlane(plane)) return null;
+  const bounds = new THREE.Box2();
+  const point = new THREE.Vector3();
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+    point.set(x, y, z).applyMatrix4(worldToPlane);
+    bounds.expandByPoint(new THREE.Vector2(point.x, point.y));
+  }
+  return bounds.expandByScalar(Math.max(bounds.getSize(new THREE.Vector2()).length() * 0.001, 1e-5));
+}
+
 // Clipping is a shader effect: raycasting must also reject removed surfaces and opaque cut caps.
 export function pickSurfaces(ray, parts, planes) {
   const objects = parts.filter((part) => part.surface.visible).map((part) => part.surface);

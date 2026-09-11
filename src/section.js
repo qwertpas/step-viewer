@@ -1,5 +1,22 @@
 import * as THREE from "three";
-import { axisPosition, pickSurfaces, worldPlane } from "./section-math.js";
+import { axisPosition, cutBounds, pickSurfaces, worldPlane } from "./section-math.js";
+
+export function capMaterial(part) {
+  let index = 0;
+  if (!part.data.color) {
+    const counts = part.surface.material.map(() => 0);
+    for (const group of part.surface.geometry.groups) counts[group.materialIndex] += group.count;
+    index = counts.indexOf(Math.max(...counts));
+  }
+  const material = part.surface.material[index].clone();
+  material.clippingPlanes = null;
+  material.side = THREE.DoubleSide;
+  material.stencilWrite = true;
+  material.stencilRef = 0;
+  material.stencilFunc = THREE.NotEqualStencilFunc;
+  material.stencilFail = material.stencilZFail = material.stencilZPass = THREE.ReplaceStencilOp;
+  return material;
+}
 
 export function setupSection({ scene, camera, canvas, controls, getParts, queryPlane, redraw, onEdit }) {
   const button = document.querySelector("#section");
@@ -13,6 +30,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   const origin = new THREE.Vector3();
   const ray = new THREE.Raycaster();
   const cache = new Map();
+  const cuts = [];
   let active = false;
   let editing = false;
   let picking = false;
@@ -42,7 +60,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   const arrow = new THREE.Group();
   for (const direction of [1, -1]) {
     const half = new THREE.ArrowHelper(new THREE.Vector3(0, direction, 0), new THREE.Vector3(), 1, 0x176ff2, 0.22, 0.16);
-    half.traverse((item) => { if (item.material) { item.material.depthTest = false; item.material.depthWrite = false; item.renderOrder = 10; } });
+    half.traverse((item) => { if (item.material) { item.material.depthTest = false; item.material.depthWrite = false; item.renderOrder = Infinity; } });
     arrow.add(half);
   }
   overlay.visible = arrow.visible = false;
@@ -61,12 +79,8 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   // Material.clone copies the plane list; keep the live list shared.
   back.clippingPlanes = front.clippingPlanes = planes;
   stencilMaterial.dispose();
-  const cap = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
-    color: 0xe3b877, side: THREE.DoubleSide, stencilWrite: true, stencilRef: 0,
-    stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.ReplaceStencilOp,
-    stencilZFail: THREE.ReplaceStencilOp, stencilZPass: THREE.ReplaceStencilOp,
-  }));
-  cap.renderOrder = 3;
+  const cap = new THREE.Group();
+  const capGeometry = new THREE.PlaneGeometry(1, 1);
   cap.visible = stencil.visible = false;
   scene.add(stencil, cap, overlay, arrow, hover);
 
@@ -76,8 +90,22 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
     cap.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
     overlay.quaternion.copy(cap.quaternion);
     arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
-    cap.scale.setScalar(size * 2);
     overlay.scale.setScalar(size);
+    cap.updateMatrix();
+    const worldToPlane = cap.matrix.clone().invert();
+    for (const cut of cuts) {
+      const bounds = cutBounds(cut.bounds, plane, worldToPlane);
+      cut.crosses = Boolean(bounds);
+      const removed = !bounds && plane.distanceToPoint(cut.bounds.getCenter(new THREE.Vector3())) < 0;
+      // Preserve the user's visibility flags; layer 1 is excluded from rendering and picking.
+      cut.part.surface.layers.set(removed ? 1 : 0);
+      cut.part.edge.layers.set(removed ? 1 : 0);
+      if (!bounds) continue;
+      const center = bounds.getCenter(new THREE.Vector2());
+      const dimensions = bounds.getSize(new THREE.Vector2());
+      cut.fill.position.set(center.x, center.y, 0);
+      cut.fill.scale.set(dimensions.x, dimensions.y, 1);
+    }
     if (writeOffset) offsetInput.value = String(Number(offset.toFixed(4)));
     redraw();
   }
@@ -108,6 +136,10 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
     planes.length = 0;
     cap.visible = stencil.visible = false;
     offset = 0;
+    for (const { part } of cuts) {
+      part.surface.layers.set(0);
+      part.edge.layers.set(0);
+    }
     edit(false);
   }
   function setRay(event) {
@@ -224,26 +256,45 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   return {
     planes,
     get editing() { return editing; },
-    reset() { clear(); cache.clear(); stencil.clear(); },
+    reset() {
+      clear(); cache.clear(); stencil.clear();
+      cap.children.forEach((mesh) => mesh.material.dispose());
+      cap.clear();
+      cuts.length = 0;
+    },
     setParts() {
       const box = new THREE.Box3();
-      for (const part of getParts()) {
-        box.union(new THREE.Box3().setFromObject(part.surface, true));
+      for (const [partIndex, part] of getParts().entries()) {
+        const bounds = new THREE.Box3().setFromObject(part.surface, true);
+        box.union(bounds);
+        const passes = [];
         for (const material of [...part.surface.material, part.edge.material]) material.clippingPlanes = planes;
         for (const [index, material] of [back, front].entries()) {
           const mesh = new THREE.Mesh(part.surface.geometry, material);
           mesh.matrix.copy(part.surface.matrix);
           mesh.matrixAutoUpdate = false;
-          mesh.renderOrder = index + 1;
+          mesh.renderOrder = partIndex * 3 + index + 1;
           mesh.userData.part = part;
           stencil.add(mesh);
+          passes.push(mesh);
         }
+        const fill = new THREE.Mesh(capGeometry, capMaterial(part));
+        fill.renderOrder = partIndex * 3 + 3;
+        fill.userData.part = part;
+        // The bounded fill replaces stencil values with zero, including depth-failed pixels.
+        // No full-screen clear is needed between bodies.
+        cap.add(fill);
+        cuts.push({ part, bounds, passes, fill, crosses: false });
       }
       size = Math.max(box.getSize(new THREE.Vector3()).length(), 1);
     },
     update() {
       if (!active) return;
-      for (const mesh of stencil.children) mesh.visible = mesh.userData.part.surface.visible;
+      for (const cut of cuts) {
+        const visible = cut.crosses && cut.part.surface.visible;
+        cut.fill.visible = visible;
+        for (const mesh of cut.passes) mesh.visible = visible;
+      }
       const scale = camera.position.distanceTo(arrow.position) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / canvas.clientHeight * 48;
       arrow.scale.setScalar(scale);
     },

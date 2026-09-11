@@ -31,6 +31,8 @@ Click **Section**, then a planar face. Drag the arrow to move the cut parallel t
 
 The plane uses the original CAD face normal. Curved faces cannot define a section. Cut surfaces are display-only caps, not selectable CAD faces. Measurements on retained faces still describe the original CAD geometry. Sections do not modify downloaded files or carry over in share links.
 
+Section fills use each body's material. Only intersected bodies need cap passes, fills are bounded to each body, and completely clipped bodies are excluded from rendering without changing their visibility settings.
+
 The CAD dependency is pinned to upstream commit `ad8ffb6007eb3fd25179232f291b626d6e78a195` because the npm release does not yet include the exact-model APIs. Its bundled Wasm is used without a custom build.
 
 Development: `npm install`, then `npm run dev`. Verify with `npm test` and `npm run build`.
