@@ -6,6 +6,15 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 const file = new File(["ISO-10303-21;\nEND-ISO-10303-21;"], "test.step");
 const info = { id: "cad123", name: file.name, size: String(file.size), capabilities: { canDownload: true } };
 
+test("fetch is called without binding it to the Drive instance", async () => {
+  const drive = new Drive({ apiKey: "key", fetch: function () {
+    assert.equal(this, undefined, "browser fetch rejects a Drive instance as its receiver");
+    return Promise.resolve(json(info));
+  } });
+  await drive.request("https://www.googleapis.com/drive/v3/files/cad123");
+  await drive.publicFile({ id: "cad123" });
+});
+
 test("share links preserve the static path and resource key but contain no credentials", () => {
   const url = shareUrl("https://example.com/viewer/?old=value#old", { id: "cad123", resourceKey: "key-123" });
   assert.equal(url, "https://example.com/viewer/#file=cad123&resourcekey=key-123");

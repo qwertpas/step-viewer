@@ -44,7 +44,7 @@ export class Drive {
   constructor({ clientId, apiKey, fetch: request = globalThis.fetch }) {
     this.clientId = clientId;
     this.apiKey = apiKey;
-    this.fetch = request;
+    this.fetch = (...args) => request(...args);
     this.token = "";
     this.expires = 0;
   }
