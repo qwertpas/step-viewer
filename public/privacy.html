@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — STEP Viewer</title>
+<style>body{max-width:720px;margin:48px auto;padding:0 24px;font:16px/1.65 system-ui;color:#23262b;background:#f8fafc}a{color:#176ff2}h1,h2{line-height:1.2}h2{margin-top:32px;font-size:21px}</style>
+<a href="./">← STEP Viewer</a>
+<h1>Privacy and sharing</h1>
+<p>STEP Viewer opens and measures CAD files in your browser. Opening a local file does not upload its contents. There is no app backend or analytics service.</p>
+<h2>Optional Google Drive sharing</h2>
+<p>Clicking “Copy share link” connects to Google and saves a copy of the original STEP file in a “STEP Viewer Shares” folder in your own Google Drive. The app requests access only to files it creates or that you open with it, not your entire Drive. Google’s sign-in library may load when you open a local model, but sign-in and uploading start only when you click Share.</p>
+<p>Shared files are readable and downloadable by anyone with the link. The whole original file is shared, including parts you hide in the viewer. Do not share confidential CAD unless this access is appropriate. The folder itself is not made public.</p>
+<p>Recipients download directly from Google Drive without signing in. Links contain a file identifier and, when needed, a resource key. They never contain the sender’s Google access token.</p>
+<h2>Storage and control</h2>
+<p>The viewer keeps Google access tokens only in the current page’s memory. It does not store passwords or refresh tokens. Google handles sign-in and consent. CAD copies and content hashes used to avoid duplicate uploads remain in your Drive until you remove them.</p>
+<p>You can make shared files private or delete them in Google Drive. This stops future access but cannot remove copies already downloaded by recipients. You can disconnect the app through <a href="https://myaccount.google.com/connections">Google account connections</a>; disconnecting alone does not revoke existing public file links.</p>
+<h2>Service providers</h2>
+<p>GitHub Pages hosts the static viewer. Google provides sign-in and Drive storage and receives the requests needed for sharing and downloading. These providers may process connection information such as IP addresses under their own policies: <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub privacy</a> and <a href="https://policies.google.com/privacy">Google privacy</a>.</p>
+<p>For questions, use the <a href="https://github.com/qwertpas/step-viewer/issues">project issue tracker</a>. Do not post private CAD files or access tokens there.</p>
+</html>

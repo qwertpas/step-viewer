@@ -3,6 +3,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { buildParts, visibleBounds } from "./model.js";
 import { CadClient } from "./cad-client.js";
 import { setupSelection } from "./selection.js";
+import { Drive, readShare, shareUrl } from "./drive.js";
+import { setupSharing } from "./share.js";
 import "./style.css";
 
 const app = document.querySelector("#app");
@@ -25,6 +27,8 @@ const hideAllButton = document.querySelector("#hide-all");
 const expandTreeButton = document.querySelector("#expand-tree");
 const collapseTreeButton = document.querySelector("#collapse-tree");
 const collapseComponentsButton = document.querySelector("#collapse-components");
+const drive = new Drive({ clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID, apiKey: import.meta.env.VITE_GOOGLE_API_KEY });
+const sharing = setupSharing(drive);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe8eaed);
@@ -273,12 +277,13 @@ function setBusy(value) {
   busy = value;
   loading.hidden = !value;
   openButton.disabled = value;
+  sharing.setLoading(value);
   edgesButton.disabled = value || !surfaces.children.length;
   document.querySelector("#measure").disabled = value || !surfaces.children.length;
 }
 
-async function openFile(file) {
-  if (busy) return;
+async function openFile(file, sharedUrl = "") {
+  if (busy || sharing.busy) return;
   if (!/\.(step|stp)$/i.test(file.name)) {
     status.textContent = "Please choose a .step or .stp file";
     return;
@@ -323,6 +328,8 @@ async function openFile(file) {
     statusDot.classList.add("ready");
     stats.innerHTML = `${size}<span></span>${Math.round(triangles).toLocaleString()} triangles`;
     stats.hidden = false;
+    sharing.setFile(file, sharedUrl);
+    if (!sharedUrl && window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
   } catch (error) {
     nextCad?.close();
     console.error(error);
@@ -419,3 +426,27 @@ new ResizeObserver(() => {
 
 controls.addEventListener("change", redraw);
 redraw();
+
+async function loadShared() {
+  try {
+    const shared = readShare(window.location.hash);
+    if (!shared) return;
+    empty.hidden = true;
+    setBusy(true);
+    status.textContent = "Downloading shared CAD…";
+    document.querySelector("#loading-text").textContent = "Downloading shared CAD…";
+    const file = await drive.download(shared);
+    setBusy(false);
+    document.querySelector("#loading-text").textContent = "Reading CAD geometry…";
+    await openFile(file, shareUrl(window.location.href, shared));
+  } catch (error) {
+    status.textContent = error.message || "Could not load the shared file.";
+    empty.hidden = Boolean(surfaces.children.length);
+  } finally {
+    setBusy(false);
+    document.querySelector("#loading-text").textContent = "Reading CAD geometry…";
+  }
+}
+loadShared();
+// Pasting another fragment-based share URL into this tab must open that model too.
+window.addEventListener("hashchange", () => window.location.reload());

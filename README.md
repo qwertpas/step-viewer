@@ -2,7 +2,13 @@ Browser-based viewer for drag and drop `.step` and `.stp` CAD files. Great for q
 
 ![STEP Viewer demo](assets/stepviewer.gif)
 
-All processing is done on your machine. There is no server.
+CAD processing is done on your machine. The viewer is a static site with no app server. Optional link sharing uploads a copy directly to your Google Drive.
+
+### Share CAD
+
+Drop a STEP file and click **Copy share link**. Google prompts for sign-in/consent when needed; the viewer automatically saves the copy in **STEP Viewer Shares** and enables read-only access for anyone with the link. Recipients open the viewer link and the CAD loads without an account. The entire original file is shared, including hidden parts. Repeated shares reuse identical file content.
+
+The site owner must first complete the [one-time Google setup](GOOGLE-DRIVE.md). Normal local viewing works without configuration. Google may show an account popup again after its short-lived browser token expires; perpetual silent connection is not supported on a static-only site. Sharing supports files up to 250 MB and is subject to Drive limits and sharing policies.
 
 Preserves STEP part and face colors, with assembly visibility controls. STEP parsing and exact measurements run in a worker to keep the viewer responsive.
 

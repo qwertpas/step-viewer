@@ -13,9 +13,23 @@
       <header class="topbar">
         <div class="brand"><span class="brand-mark"></span> STEP Viewer</div>
         <div id="file-name" class="file-name">No model open</div>
-        <button id="open" class="open-button"><span>＋</span> Open file</button>
+        <div class="file-actions">
+          <div class="share-action">
+            <button id="share" class="share-button" disabled title="Save a copy to Google Drive and let anyone with the link view and download it">Copy share link</button>
+            <small id="share-note" hidden>Anyone with the link</small>
+          </div>
+          <button id="open" class="open-button"><span>＋</span> Open file</button>
+        </div>
         <input id="file-input" type="file" accept=".step,.stp" hidden />
       </header>
+
+      <aside id="share-panel" class="share-panel" hidden>
+        <button id="close-share" aria-label="Close sharing message">×</button>
+        <p id="share-message" role="status" aria-live="polite"></p>
+        <input id="share-link" aria-label="Share link" readonly hidden />
+        <a id="share-setup" href="https://github.com/qwertpas/step-viewer/blob/main/GOOGLE-DRIVE.md" target="_blank" rel="noopener noreferrer" hidden>Google setup guide</a>
+        <a class="privacy-link" href="./privacy.html" target="_blank" rel="noopener">Privacy and sharing</a>
+      </aside>
 
       <aside class="view-tools" aria-label="View controls">
         <button id="fit" title="Fit model" aria-label="Fit model">⌗</button>
@@ -61,7 +75,7 @@
       </button>
 
       <div id="loading" class="loading-card" hidden>
-        <span class="spinner"></span> Reading CAD geometry…
+        <span class="spinner"></span><span id="loading-text">Reading CAD geometry…</span>
       </div>
 
       <footer class="statusbar">

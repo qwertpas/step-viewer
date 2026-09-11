@@ -47,6 +47,18 @@ button { color: inherit; font: inherit; }
 .open-button:hover { background: #0865ed; }
 .open-button:active { transform: translateY(1px); }
 .open-button:disabled { opacity: .65; cursor: wait; }
+.file-actions { display: flex; justify-self: end; align-items: center; gap: 10px; }
+.share-action { position: relative; }
+.share-action small { position: absolute; right: 0; top: 38px; white-space: nowrap; font-size: 12px; color: #4d535a; background: #f4f6f8; border-radius: 4px; padding: 2px 5px; }
+.share-button { height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff9; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.share-button:disabled { opacity: .5; cursor: default; }
+.share-button:hover:not(:disabled) { background: white; }
+.share-panel { position: absolute; z-index: 6; top: 86px; right: 66px; width: min(380px, calc(100vw - 80px)); padding: 14px; border: 1px solid white; border-radius: 12px; background: #f8fafc; box-shadow: 0 8px 28px #1e252c22; font-size: 14px; }
+.share-panel p { margin: 0 20px 0 0; line-height: 1.5; overflow-wrap: anywhere; }
+.share-panel input { width: 100%; margin-top: 12px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; font: inherit; }
+.share-panel a { display: inline-block; margin-top: 10px; color: var(--blue); }
+.share-panel .privacy-link { display: block; font-size: 12px; }
+#close-share { position: absolute; right: 8px; top: 8px; border: 0; background: none; font-size: 20px; cursor: pointer; }
 
 .view-tools { position: absolute; z-index: 3; top: 82px; right: 14px; display: flex; flex-direction: column; padding: 5px; border: 1px solid rgba(255,255,255,.78); border-radius: 11px; background: var(--panel); box-shadow: 0 8px 28px rgba(30,37,44,.08); backdrop-filter: blur(20px); }
 .view-tools button { width: 34px; height: 32px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; font-size: 11px; font-weight: 650; }
@@ -129,4 +141,10 @@ button { color: inherit; font: inherit; }
   .component-tree { max-height: calc(100vh - 209px); }
   .statusbar { right: 8px; bottom: 8px; left: 8px; }
   .model-stats { margin-left: 10px; }
+}
+@media (max-width: 460px) {
+  .topbar { padding-left: 10px; }
+  .brand { font-size: 0; gap: 0; }
+  .file-actions { gap: 6px; }
+  .open-button { padding: 0 8px; }
 }
