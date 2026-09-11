@@ -18,6 +18,17 @@ button { color: inherit; font: inherit; }
 .has-model:not(.panel-collapsed) #canvas { left: 318px; width: calc(100% - 318px); }
 #canvas, #canvas canvas { display: block; width: 100%; height: 100%; }
 #canvas canvas { outline: none; }
+#canvas canvas.measuring { cursor: crosshair; }
+.view-tools button.active { color: var(--blue); background: rgba(23,111,242,.12); }
+.view-tools button:disabled { opacity: .4; cursor: default; }
+.component-row.selected { background: rgba(23,111,242,.12); }
+.selection-panel { position: absolute; z-index: 4; bottom: 66px; right: 14px; width: min(320px, calc(100vw - 28px)); padding: 14px; border: 1px solid white; border-radius: 12px; background: var(--panel); backdrop-filter: blur(20px); box-shadow: 0 8px 28px rgba(30,37,44,.1); }
+.selection-panel header { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
+.selection-panel strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-panel button { border: 0; background: transparent; font-size: 20px; cursor: pointer; }
+#selection-result { margin: 8px 0; white-space: pre-line; font-size: 14px; font-variant-numeric: tabular-nums; }
+.selection-panel small { display: block; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.dimension-label { position: fixed; z-index: 3; transform: translate(-50%, -100%); pointer-events: none; padding: 5px 9px; border: 1px solid #8db3ed; border-radius: 6px; background: #f8fbff; color: #145bd7; font-size: 13px; font-variant-numeric: tabular-nums; box-shadow: 0 2px 8px #0001; }
 [hidden] { display: none !important; }
 
 .topbar {

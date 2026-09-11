@@ -10,7 +10,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
-    "@tx-code/occt-js": "0.1.7",
+    "@tx-code/occt-js": "github:tx-code/occt-js#ad8ffb6007eb3fd25179232f291b626d6e78a195",
     "three": "0.185.1"
   },
   "devDependencies": {

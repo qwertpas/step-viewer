@@ -36,3 +36,17 @@ test("uncolored faces inherit the part color", () => {
   assert.equal(surface.geometry.groups[0].count, 3);
   assert.equal(surface.geometry.getAttribute("normal").count, 3);
 });
+
+test("merged draw groups preserve face and edge identities", () => {
+  const source = {
+    ...geometry, id: "geo_0", indices: [0, 1, 2, 0, 2, 1], triangleToFaceMap: [4, 9],
+    faces: [{ id: 4, firstIndex: 0, indexCount: 3 }, { id: 9, firstIndex: 3, indexCount: 3 }],
+    edges: [{ id: 7, points: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  };
+  const { parts } = buildParts({ geometries: [source], rootNodes: [node(0)], exactGeometryBindings: [{ geometryId: "geo_0", exactShapeHandle: 23 }] });
+  assert.deepEqual(parts[0].surface.geometry.groups, [{ start: 0, count: 6, materialIndex: 0 }]);
+  assert.deepEqual(parts[0].data.triangleToFaceMap, [4, 9]);
+  assert.deepEqual(parts[0].edgeIds, [7, 7]);
+  assert.equal(parts[0].handle, 23);
+  assert.equal(parts[0].edge.geometry.getAttribute("position").count, 4);
+});

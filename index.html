@@ -23,7 +23,16 @@
         <button data-view="front" title="Front view">F</button>
         <button data-view="right" title="Right view">R</button>
         <button data-view="top" title="Top view">T</button>
+        <span></span>
+        <button id="measure" title="Measure exact CAD geometry (M)" aria-label="Measure" aria-pressed="false" disabled>M</button>
       </aside>
+
+      <aside id="selection-panel" class="selection-panel" hidden aria-live="polite">
+        <header><strong id="selection-title"></strong><button id="clear-selection" aria-label="Clear selection" title="Clear selection (Esc)">×</button></header>
+        <div id="selection-result"></div>
+        <small id="selection-hint"></small>
+      </aside>
+      <div id="dimension-label" class="dimension-label" hidden></div>
 
       <aside id="components" class="components" hidden>
         <header class="components-header">
@@ -52,7 +61,7 @@
       </button>
 
       <div id="loading" class="loading-card" hidden>
-        <span class="spinner"></span> Tessellating model…
+        <span class="spinner"></span> Reading CAD geometry…
       </div>
 
       <footer class="statusbar">

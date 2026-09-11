@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 export function buildParts(result) {
+  const handles = new Map(result.exactGeometryBindings?.map((binding) => [binding.geometryId, binding.exactShapeHandle]));
   const geometries = result.geometries.map((part) => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(part.positions, 3));
@@ -21,16 +22,31 @@ export function buildParts(result) {
       return colors.get(key);
     }
     const base = material(part.color);
+    function group(start, count, index) {
+      const last = geometry.groups.at(-1);
+      if (last && last.materialIndex === index && last.start + last.count === start) last.count += count;
+      else geometry.addGroup(start, count, index);
+    }
     if (part.faces.length) {
       let start = 0;
       for (const face of part.faces) {
-        if (face.firstIndex > start) geometry.addGroup(start, face.firstIndex - start, base);
-        geometry.addGroup(face.firstIndex, face.indexCount, material(face.color || part.color));
+        if (face.firstIndex > start) group(start, face.firstIndex - start, base);
+        group(face.firstIndex, face.indexCount, material(face.color || part.color));
         start = face.firstIndex + face.indexCount;
       }
-      if (start < part.indices.length) geometry.addGroup(start, part.indices.length - start, base);
+      if (start < part.indices.length) group(start, part.indices.length - start, base);
     } else geometry.addGroup(0, part.indices.length, base);
-    return { geometry, materials, edges: new THREE.EdgesGeometry(geometry, 25) };
+    const points = [];
+    const edgeIds = [];
+    for (const edge of part.edges || []) {
+      for (let i = 0; i + 5 < edge.points.length; i += 3) {
+        points.push(...edge.points.slice(i, i + 6));
+        edgeIds.push(edge.id);
+      }
+    }
+    const edges = new THREE.BufferGeometry();
+    edges.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+    return { geometry, materials, edges, edgeIds, data: part, handle: handles.get(part.id) };
   });
   const parts = [];
   const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x22272e, transparent: true, opacity: 0.36 });
@@ -43,7 +59,12 @@ export function buildParts(result) {
       surface.applyMatrix4(transform);
       edge.applyMatrix4(transform);
       const id = parts.length;
-      parts.push({ surface, edge, name: result.geometries[index].name, triangles: source.geometry.index.count / 3 });
+      surface.userData.partIndex = id;
+      edge.userData.partIndex = id;
+      parts.push({
+        surface, edge, name: node.name || source.data.name, triangles: source.geometry.index.count / 3,
+        data: source.data, edgeIds: source.edgeIds, handle: source.handle, transform: transform.toArray(),
+      });
       return id;
     });
     return { name: node.name, meshes, children: node.children.map((child) => visit(child, transform)) };

@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { buildParts, visibleBounds } from "./model.js";
+import { CadClient } from "./cad-client.js";
+import { setupSelection } from "./selection.js";
 import "./style.css";
 
 const app = document.querySelector("#app");
@@ -71,6 +73,23 @@ let partObjects = [];
 let treeEntries = [];
 let branchEntries = [];
 let loadedMeshes = [];
+let cad;
+let frame = 0;
+function redraw() {
+  if (frame) return;
+  frame = requestAnimationFrame(() => {
+    frame = 0;
+    controls.update();
+    selection.update();
+    renderer.render(scene, camera);
+  });
+}
+const selection = setupSelection({
+  scene, camera, canvas: renderer.domElement, getParts: () => partObjects, redraw,
+  measure: (refs) => cad.request("measure", { refs }),
+  setVisible: setPartsVisible,
+  onSelect: (index) => treeEntries.forEach((entry) => entry.row.classList.toggle("selected", entry.indices.includes(index))),
+});
 
 function dispose(group) {
   group.traverse((item) => {
@@ -139,6 +158,7 @@ function setPartsVisible(indices, visible) {
     part.edge.visible = visible;
   }
   updateTreeStates();
+  selection.visibilityChanged();
 }
 
 function makeTreeRow(node, depth, fallbackName) {
@@ -200,7 +220,7 @@ function makeTreeRow(node, depth, fallbackName) {
     row.appendChild(total);
   }
 
-  treeEntries.push({ button: visibility, indices, name });
+  treeEntries.push({ button: visibility, indices, name, row });
 
   if (children.length) {
     const childList = document.createElement("div");
@@ -248,28 +268,13 @@ function buildComponentTree(root, meshes) {
   updateTreeStates();
 }
 
-function readStep(buffer) {
-  const worker = new Worker(new URL("./import-worker.js", import.meta.url), { type: "module" });
-  return new Promise((resolve, reject) => {
-    worker.onmessage = ({ data }) => {
-      worker.terminate();
-      if (data.error) reject(new Error(data.error));
-      else resolve(data.result);
-    };
-    worker.onerror = () => {
-      worker.terminate();
-      reject(new Error("Could not start the STEP reader. Please reload and try again."));
-    };
-    worker.postMessage(buffer, [buffer]);
-  });
-}
-
 let busy = false;
 function setBusy(value) {
   busy = value;
   loading.hidden = !value;
   openButton.disabled = value;
   edgesButton.disabled = value || !surfaces.children.length;
+  document.querySelector("#measure").disabled = value || !surfaces.children.length;
 }
 
 async function openFile(file) {
@@ -284,10 +289,16 @@ async function openFile(file) {
   setBusy(true);
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
+  let nextCad;
   try {
-    const result = await readStep(await file.arrayBuffer());
+    nextCad = new CadClient();
+    const result = await nextCad.request("open", { buffer: await file.arrayBuffer() });
     const next = buildParts(result);
 
+    selection.reset();
+    cad?.close();
+    cad = nextCad;
+    nextCad = null;
     dispose(surfaces);
     dispose(outlines);
     let triangles = 0;
@@ -313,6 +324,7 @@ async function openFile(file) {
     stats.innerHTML = `${size}<span></span>${Math.round(triangles).toLocaleString()} triangles`;
     stats.hidden = false;
   } catch (error) {
+    nextCad?.close();
     console.error(error);
     status.textContent = error instanceof Error ? error.message : "Could not read this file";
     if (!surfaces.children.length) empty.hidden = false;
@@ -346,6 +358,7 @@ edgesButton.addEventListener("click", () => {
   const enabled = edgesButton.classList.toggle("active");
   outlines.visible = enabled;
   edgesButton.setAttribute("aria-pressed", String(enabled));
+  redraw();
 });
 
 showAllButton.addEventListener("click", () => setPartsVisible(partObjects.map((_, index) => index), true));
@@ -401,9 +414,8 @@ new ResizeObserver(() => {
   camera.aspect = host.clientWidth / host.clientHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(host.clientWidth, host.clientHeight);
+  redraw();
 }).observe(host);
 
-renderer.setAnimationLoop(() => {
-  controls.update();
-  renderer.render(scene, camera);
-});
+controls.addEventListener("change", redraw);
+redraw();
