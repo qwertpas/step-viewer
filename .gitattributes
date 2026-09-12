@@ -1,4 +1,3 @@
-# Preserve patch context and upstream CAD/license files verbatim.
+# Preserve patch context and upstream licenses verbatim.
 *.patch -whitespace
-test/fixtures/*.step -whitespace
 vendor/occt-js/licenses/* -whitespace
