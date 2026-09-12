@@ -7,7 +7,7 @@ export function visibilityHistory(getParts, changed) {
       const part = parts[change.index];
       part.surface.visible = part.edge.visible = change[key];
     }
-    changed();
+    changed(changes);
   }
   function move(from, to, key) {
     const changes = from.pop();

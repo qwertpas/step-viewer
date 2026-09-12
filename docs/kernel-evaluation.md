@@ -1,0 +1,13 @@
+# CAD kernel evaluation
+
+Reviewed [stefangolas/look](https://github.com/stefangolas/look/tree/33d121975acc82eb0f2a57c6b1043ec4e1ac6ad5). Its reported 3.21× STEP advantage is a native render comparison against F3D 3.5 on one `core_xy` assembly, not a browser benchmark or a general guarantee. See the project's [benchmark methodology](https://github.com/stefangolas/look/blob/33d121975acc82eb0f2a57c6b1043ec4e1ac6ad5/docs/BENCHMARKS.md).
+
+Look's Rust STEP parser and Truck tessellator are substantial replacement components. Its native path parallelizes independent shells; Truck has separate serial WebAssembly paths. The existing viewer also needs retained CAD topology for exact distances, diameters, areas, and planar section references. Replacing the importer therefore requires more than swapping a mesh decoder.
+
+Useful approaches carry over without changing the geometry engine: reuse unique geometry across instances, retain parsed state, avoid repeated topology searches, preallocate output buffers, cache bounds, and measure parsing, CAD transfer, meshing, extraction, and display separately. The viewer already shared instance geometry; this rewrite extends reuse into the worker, materials, topology queries, and interaction indexes.
+
+The OCCT wrapper had two avoidable extraction costs: rescanning faces for every edge and searching assembly labels for every uncolored face. The optimized runtime uses one adjacency pass and skips color searches when no matching label exists. Labeled faces retain XDE's parent and location resolution. It also builds with speed optimization and thin LTO, omits unused metadata, and caches exact topology indexes. Display tolerances and exact geometry remain unchanged.
+
+Three small OCCT changes also avoid repeated successful edge validation, identity-transformed surface copies, and duplicate mesh midpoint evaluation. The complete changes and rebuildable source are in [the runtime package](../vendor/occt-js/README.md). Profiling Pinto found that shape healing consumed most of CAD transfer time; construction and assembly insertion were a small fraction. Removing required healing or splitting the assembly into independent workers would need additional correctness work around shared edges, units, placements, face colors, and exact measurement references.
+
+Looser tessellation was tested on Pinto and rejected: it provided little reduction in triangles and an aggressive setting failed face coverage. Correctness checks compare complete imported scenes, CAD identifiers, colors, transforms, rendered buffers, ray picks, and sections. See [performance measurements](performance.md) for reproducible commands and measured results.

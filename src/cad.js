@@ -5,17 +5,22 @@ const options = {
   linearDeflection: 0.001, angularDeflection: 0.5, readColors: true, readNames: true,
 };
 
-export function openCad(occt, bytes, display = {}) {
+export function openCad(occt, bytes, display = {}, progress) {
+  progress?.("read");
+  const start = performance.now();
   const result = occt.OpenExactStepModel(bytes, { ...options, ...display });
   if (!result.success || !result.geometries?.length || !result.exactModelId) {
     if (result.exactModelId) occt.ReleaseExactModel(result.exactModelId);
     throw new Error("No solid CAD geometry was found");
   }
   try {
+    const repairStart = performance.now();
+    progress?.("repair");
+    const handles = new Map(result.exactGeometryBindings.map((binding) => [binding.geometryId, binding.exactShapeHandle]));
     for (const geometry of result.geometries) {
-      const handle = result.exactGeometryBindings.find((binding) => binding.geometryId === geometry.id).exactShapeHandle;
-      for (const face of geometry.faces) if (!face.indexCount) repairFace(occt, result.exactModelId, handle, geometry, face);
+      for (const face of geometry.faces) if (!face.indexCount) repairFace(occt, result.exactModelId, handles.get(geometry.id), geometry, face);
     }
+    result.timings = { ...result.timings, kernelMs: repairStart - start, repairMs: performance.now() - repairStart };
   } catch (error) {
     occt.ReleaseExactModel(result.exactModelId);
     throw error;

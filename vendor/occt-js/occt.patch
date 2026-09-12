@@ -1,0 +1,105 @@
+diff --git a/src/BRepMesh/BRepMesh_DelaunayDeflectionControlMeshAlgo.hxx b/src/BRepMesh/BRepMesh_DelaunayDeflectionControlMeshAlgo.hxx
+index ed2a251d..f257c57b 100644
+--- a/src/BRepMesh/BRepMesh_DelaunayDeflectionControlMeshAlgo.hxx
++++ b/src/BRepMesh/BRepMesh_DelaunayDeflectionControlMeshAlgo.hxx
+@@ -324,10 +324,11 @@ private:
+       if (myCouplesMap->Add(BRepMesh_OrientedEdge(aFirstVertex, aLastVertex)))
+       {
+         const gp_XY aMidPnt2d = (theNodesInfo[i].Point2d + theNodesInfo[j].Point2d) / 2.;
++        const gp_Pnt aMidPnt3d = getPoint3d(aMidPnt2d);
+ 
+-        if (!usePoint(aMidPnt2d, LineDeviation(theNodesInfo[i].Point, theNodesInfo[j].Point)))
++        if (!usePoint(aMidPnt2d, aMidPnt3d, LineDeviation(theNodesInfo[i].Point, theNodesInfo[j].Point)))
+         {
+-          if (!rejectSplitLinksForMinSize(theNodesInfo[i], theNodesInfo[j], aMidPnt2d))
++          if (!rejectSplitLinksForMinSize(theNodesInfo[i], theNodesInfo[j], aMidPnt3d))
+           {
+             if (!checkLinkEndsForAngularDeviation(theNodesInfo[i], theNodesInfo[j], aMidPnt2d))
+             {
+@@ -343,11 +344,10 @@ private:
+   //! the given link by the middle point fit MinSize requirement.
+   Standard_Boolean rejectSplitLinksForMinSize(const TriangleNodeInfo& theNodeInfo1,
+                                               const TriangleNodeInfo& theNodeInfo2,
+-                                              const gp_XY&            theMidPoint)
++                                              const gp_Pnt&           theMidPoint)
+   {
+-    const gp_Pnt aPnt = getPoint3d(theMidPoint);
+-    return ((theNodeInfo1.Point - aPnt.XYZ()).SquareModulus() < mySqMinSize
+-            || (theNodeInfo2.Point - aPnt.XYZ()).SquareModulus() < mySqMinSize);
++    return ((theNodeInfo1.Point - theMidPoint.XYZ()).SquareModulus() < mySqMinSize
++            || (theNodeInfo2.Point - theMidPoint.XYZ()).SquareModulus() < mySqMinSize);
+   }
+ 
+   //! Checks the given point (located between the given nodes)
+@@ -396,7 +396,13 @@ private:
+   template <class DeflectionFunctor>
+   Standard_Boolean usePoint(const gp_XY& thePnt2d, const DeflectionFunctor& theDeflectionFunctor)
+   {
+-    const gp_Pnt aPnt = getPoint3d(thePnt2d);
++    return usePoint(thePnt2d, getPoint3d(thePnt2d), theDeflectionFunctor);
++  }
++
++  template <class DeflectionFunctor>
++  Standard_Boolean usePoint(const gp_XY& thePnt2d, const gp_Pnt& aPnt,
++                            const DeflectionFunctor& theDeflectionFunctor)
++  {
+     if (!checkDeflectionOfPointAndUpdateCache(thePnt2d,
+                                               aPnt,
+                                               theDeflectionFunctor.SquareDeviation(aPnt)))
+diff --git a/src/ShapeAnalysis/ShapeAnalysis_Edge.cxx b/src/ShapeAnalysis/ShapeAnalysis_Edge.cxx
+index eb7a7935..16c69d38 100644
+--- a/src/ShapeAnalysis/ShapeAnalysis_Edge.cxx
++++ b/src/ShapeAnalysis/ShapeAnalysis_Edge.cxx
+@@ -735,8 +735,9 @@ Standard_Boolean ShapeAnalysis_Edge::CheckSameParameter(const TopoDS_Edge&     e
+     IsPCurveFound = Standard_True;
+ 
+     // Apply transformations for the surface
+-    Handle(Geom_Surface) aST =
+-      Handle(Geom_Surface)::DownCast(aS->Transformed(aLoc.Transformation()));
++    Handle(Geom_Surface) aST = aS;
++    if (!aLoc.IsIdentity())
++      aST = Handle(Geom_Surface)::DownCast(aS->Transformed(aLoc.Transformation()));
+ 
+     // Compute deviation between curves
+     Handle(Geom2dAdaptor_Curve) GHPC = new Geom2dAdaptor_Curve(aPC, f, l);
+@@ -764,8 +765,9 @@ Standard_Boolean ShapeAnalysis_Edge::CheckSameParameter(const TopoDS_Edge&     e
+     {
+       Handle(Geom2dAdaptor_Curve) GHPC = new Geom2dAdaptor_Curve(aPC, aFirst, aLast);
+ 
+-      Handle(Geom_Surface) aST =
+-        Handle(Geom_Surface)::DownCast(aFaceSurf->Transformed(aFaceLoc.Transformation()));
++      Handle(Geom_Surface) aST = aFaceSurf;
++      if (!aFaceLoc.IsIdentity())
++        aST = Handle(Geom_Surface)::DownCast(aFaceSurf->Transformed(aFaceLoc.Transformation()));
+       Handle(GeomAdaptor_Surface) GAHS = new GeomAdaptor_Surface(aST);
+ 
+       Handle(Adaptor3d_CurveOnSurface) ACS = new Adaptor3d_CurveOnSurface(GHPC, GAHS);
+diff --git a/src/ShapeFix/ShapeFix.cxx b/src/ShapeFix/ShapeFix.cxx
+index 5f723141..2b8d633f 100644
+--- a/src/ShapeFix/ShapeFix.cxx
++++ b/src/ShapeFix/ShapeFix.cxx
+@@ -94,6 +94,7 @@ Standard_Boolean ShapeFix::SameParameter(const TopoDS_Shape&
+   Standard_Boolean      iatol  = (tol > 0);
+   Handle(ShapeFix_Edge) sfe    = new ShapeFix_Edge;
+   TopExp_Explorer       ex(shape, TopAbs_EDGE);
++  TopTools_MapOfShape   checkedEdges;
+   Message_Msg           doneMsg("FixEdge.SameParameter.MSG0");
+ 
+   // Start progress scope (no need to check if progress exists -- it is safe)
+@@ -116,6 +117,16 @@ Standard_Boolean ShapeFix::SameParameter(const TopoDS_Shape&
+         E = TopoDS::Edge(ex.Current());
+         ex.Next();
+ 
++        // The first visit checks every incident face. Other edges cannot change
++        // this edge's curves; repeated successful checks only raise the same
++        // tolerances. Preserve forced repair, failed retries and message counts.
++        if (!enforce && theMsgReg.IsNull() && !checkedEdges.Add(E)
++            && BRep_Tool::SameParameter(E))
++        {
++          aPS.Next();
++          continue;
++        }
++
+         if (!iatol)
+           tol = BRep_Tool::Tolerance(E);
+         if (enforce)

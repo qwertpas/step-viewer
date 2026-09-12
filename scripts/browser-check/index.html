@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>STEP browser benchmark</title>
+<style>
+body{font:16px system-ui;margin:20px;color:#17212b;background:#f5f7fa}h1{font-size:24px;margin:0 0 12px}label{margin-right:18px}button,input{font:inherit}button{padding:9px 18px}input[type=number]{width:55px}#status{font-weight:600;margin:15px 0}table{border-collapse:collapse;background:white;margin:12px 0}th,td{padding:7px 14px;text-align:left;border:1px solid #ccd4de}iframe{width:100%;height:760px;border:1px solid #aab6c3;background:white}pre{white-space:pre-wrap;font-size:13px}#frame-label{margin:10px 0}p{max-width:1150px}
+</style></head><body>
+<h1>STEP browser benchmark</h1>
+<p><a href="/regression.html">Open regression checks</a> · Four functional checks using the public fixtures.</p>
+<p>Choose the local STEP file, then Run. Both original and optimized viewers remain visible while loading. Every measured round opens a fresh viewer and then reopens the same file. Files stay in this browser; only timing and count results are saved locally.</p>
+<label>STEP file <input id="file" type="file" accept=".step,.stp"></label>
+<label>Measured rounds <input id="rounds" type="number" min="1" max="10" value="3"></label>
+<label><input id="warmup" type="checkbox" checked> One warmup round</label>
+<button id="run">Run browser benchmark</button><button id="stop" disabled>Stop after current load</button>
+<div id="status" role="status" aria-live="polite">Ready. Select a STEP file.</div>
+<div id="summary" aria-live="polite"></div><div id="frame-label"></div><div id="viewer"></div>
+<table><thead><tr><th>Round</th><th>Viewer</th><th>Open</th><th>Load seconds</th><th>Import seconds</th><th>Parts</th></tr></thead><tbody id="rows"></tbody></table>
+<details><summary>JSON report</summary><pre id="json"></pre></details>
+<script>
+const $ = id => document.getElementById(id);
+let stopping = false;
+const labels = {before:'Original',after:'Optimized'};
+const delay = ms => new Promise(resolve => setTimeout(resolve,ms));
+const median = values => {const sorted=[...values].sort((a,b)=>a-b),m=Math.floor(sorted.length/2);return sorted.length%2?sorted[m]:(sorted[m-1]+sorted[m])/2;};
+async function frame(version) {
+  const iframe=document.createElement('iframe');
+  iframe.title=labels[version]+' STEP viewer';
+  const loaded=new Promise((resolve,reject)=>{iframe.onload=resolve;iframe.onerror=reject;});
+  iframe.src='/'+version+'/';
+  $('frame-label').textContent=labels[version]+' viewer';
+  $('viewer').replaceChildren(iframe);
+  await loaded;
+  await new Promise(resolve=>iframe.contentWindow.requestAnimationFrame(()=>iframe.contentWindow.requestAnimationFrame(resolve)));
+  return iframe;
+}
+async function open(iframe,file,version,round,mode,warmup) {
+  const win=iframe.contentWindow,doc=iframe.contentDocument;
+  win.cadBenchmark.latest=null;win.cadBenchmark.phases=[];win.cadBenchmark.errors=[];
+  const input=doc.querySelector('#file-input');
+  const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;
+  input.dispatchEvent(new win.Event('change',{bubbles:true}));
+  const started=performance.now();
+  while(true){
+    await delay(50);
+    const errors=win.cadBenchmark.errors;
+    if(errors.length) throw new Error(labels[version]+': '+errors.join('; '));
+    const measures=Object.fromEntries(win.performance.getEntriesByType('measure').map(entry=>[entry.name,entry.duration]));
+    if(doc.querySelector('#loading').hidden){
+      if(!measures['cad-load']) throw new Error(labels[version]+': '+doc.querySelector('#status').textContent);
+      const worker=win.cadBenchmark.latest;
+      return {version,round,mode,warmup,loadMs:measures['cad-load'],importMs:measures['cad-import'],displayMs:measures['cad-display'],workerMs:worker.receivedAt-worker.sentAt,cached:worker.cached,timings:worker.timings,stats:worker.stats,status:doc.querySelector('#status').textContent,modelStats:doc.querySelector('#model-stats').textContent,phases:win.cadBenchmark.phases.map(phase=>({stage:phase.stage,elapsedMs:phase.at-win.performance.getEntriesByName('cad-load-start')[0].startTime}))};
+    }
+    if(performance.now()-started>240000) throw new Error('Load timed out after four minutes');
+  }
+}
+async function save(report){
+  $('json').textContent=JSON.stringify(report,null,2);
+  const response=await fetch('/results',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(report,null,2)});
+  if(!response.ok)throw new Error(await response.text());
+}
+$('stop').onclick=()=>{stopping=true;$('status').textContent='Stopping after the current load…';};
+$('run').onclick=async()=>{
+  const file=$('file').files[0],rounds=Number($('rounds').value);
+  if(!file){$('status').textContent='Choose a STEP file first.';return;}
+  if(!Number.isInteger(rounds)||rounds<1||rounds>10){$('status').textContent='Choose between one and ten rounds.';return;}
+  stopping=false;$('run').disabled=true;$('stop').disabled=false;$('rows').replaceChildren();$('summary').textContent='';
+  const report={startedAt:new Date().toISOString(),file:file.name,fileBytes:file.size,browser:navigator.userAgent,viewport:{width:innerWidth,height:innerHeight},rounds,warmup:$('warmup').checked,complete:false,strategy:'Visible UI initiated benchmark. Fresh iframe per version per round, followed by repeat import. Alternating original/optimized order. One optional warmup round excluded from medians. App cad-load display-ready measure; no external browser automation.',samples:[]};
+  try{
+    report.versions=await(await fetch('/manifest')).json();
+    const total=rounds+(report.warmup?1:0);
+    outer:for(let n=0;n<total;n++){
+      const warmup=report.warmup&&n===0,round=report.warmup?n:n+1;
+      const order=n%2?['after','before']:['before','after'];
+      for(const version of order){
+        if(stopping)break outer;
+        const iframe=await frame(version);
+        for(const mode of ['first','repeat']){
+          if(stopping)break outer;
+          $('status').textContent=(warmup?'Warmup':`Round ${round} of ${rounds}`)+` · ${labels[version]} · ${mode} open`;
+          const sample=await open(iframe,file,version,round,mode,warmup);
+          const first=report.samples[0];
+          if(first&&(sample.status!==first.status||sample.modelStats!==first.modelStats))throw new Error('Displayed part/triangle counts differ between imports');
+          report.samples.push(sample);
+          const row=document.createElement('tr');
+          for(const value of [warmup?'Warmup':round,labels[version],mode,(sample.loadMs/1000).toFixed(3),(sample.importMs/1000).toFixed(3),sample.status]){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}
+          $('rows').append(row);await save(report);
+        }
+      }
+    }
+    report.complete=!stopping;
+    report.summary={};
+    for(const mode of ['first','repeat']){
+      const values=version=>report.samples.filter(s=>!s.warmup&&s.version===version&&s.mode===mode).map(s=>s.loadMs);
+      const before=values('before'),after=values('after');
+      if(before.length&&after.length)report.summary[mode]={originalMedianMs:median(before),optimizedMedianMs:median(after),speedup:median(before)/median(after),originalSamples:before.length,optimizedSamples:after.length};
+    }
+    $('summary').textContent=Object.entries(report.summary).map(([mode,s])=>`${mode} open: ${(s.originalMedianMs/1000).toFixed(3)} s original → ${(s.optimizedMedianMs/1000).toFixed(3)} s optimized; ${s.speedup.toFixed(2)}× faster.`).join(' ');
+    $('status').textContent=stopping?'Stopped. Partial results saved.':'Complete. Results saved locally; see the server output for the path.';
+  }catch(error){report.error=error.message;$('status').textContent='Benchmark failed: '+error.message;}
+  finally{report.finishedAt=new Date().toISOString();await save(report);$('run').disabled=false;$('stop').disabled=true;}
+};
+</script></body></html>

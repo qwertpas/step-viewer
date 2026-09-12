@@ -1,0 +1,34 @@
+{
+  "name": "@tx-code/occt-js",
+  "version": "0.1.14-step-viewer.2",
+  "private": true,
+  "description": "Optimized OCCT runtime for step-viewer",
+  "license": "LGPL-2.1-only",
+  "main": "dist/occt-js.js",
+  "module": "dist/occt-js.mjs",
+  "types": "dist/occt-js.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/occt-js.d.ts",
+      "node": "./dist/occt-js.js",
+      "require": "./dist/occt-js.js",
+      "import": "./dist/occt-js.mjs",
+      "default": "./dist/occt-js.mjs"
+    },
+    "./dist/occt-js.js": "./dist/occt-js.js",
+    "./dist/occt-js.mjs": "./dist/occt-js.mjs",
+    "./dist/occt-js.wasm": "./dist/occt-js.wasm",
+    "./dist/occt-js.d.ts": "./dist/occt-js.d.ts",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "licenses",
+    "README.md",
+    "kernel.patch",
+    "occt.patch",
+    "rebuild.sh",
+    "source.tar.gz",
+    "SHA256SUMS"
+  ]
+}

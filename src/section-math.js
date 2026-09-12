@@ -32,8 +32,18 @@ export function cutBounds(box, plane, worldToPlane) {
 
 // Clipping is a shader effect: raycasting must also reject removed surfaces and opaque cut caps.
 export function pickSurfaces(ray, parts, planes) {
-  const objects = parts.filter((part) => part.surface.visible).map((part) => part.surface);
-  if (!planes.length) return { hit: ray.intersectObjects(objects, false)[0], limit: Infinity };
+  const objects = [];
+  for (const part of parts) {
+    if (!part.surface.visible || !ray.layers.test(part.surface.layers)) continue;
+    if (!ray.ray.intersectsBox(part.bounds)) continue;
+    objects.push(part.surface);
+  }
+  const firstHitOnly = ray.firstHitOnly;
+  ray.firstHitOnly = !planes.length;
+  if (!planes.length) {
+    try { return { hit: ray.intersectObjects(objects, false)[0], limit: Infinity }; }
+    finally { ray.firstHitOnly = firstHitOnly; }
+  }
   const sides = new Map();
   for (const object of objects) for (const material of object.material) {
     if (!sides.has(material)) sides.set(material, material.side);
@@ -41,8 +51,16 @@ export function pickSurfaces(ray, parts, planes) {
   }
   let hits;
   try { hits = ray.intersectObjects(objects, false); }
-  finally { for (const [material, side] of sides) material.side = side; }
-  const facing = (hit) => hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).dot(ray.ray.direction);
+  finally {
+    for (const [material, side] of sides) material.side = side;
+    ray.firstHitOnly = firstHitOnly;
+  }
+  const normals = new Map();
+  const normal = new THREE.Vector3();
+  const facing = (hit) => {
+    if (!normals.has(hit.object)) normals.set(hit.object, new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
+    return normal.copy(hit.face.normal).applyNormalMatrix(normals.get(hit.object)).dot(ray.ray.direction);
+  };
   let limit = Infinity;
   const crossing = ray.ray.intersectPlane(planes[0], new THREE.Vector3());
   if (crossing) {

@@ -1,0 +1,657 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9443b11..3069ac1 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -488,7 +488,8 @@ if(${EMSCRIPTEN})
+     add_executable(occt-js ${OcctJSSourceFiles} ${OcctSourceFiles})
+ 
+     target_compile_options(occt-js PUBLIC "$<$<CONFIG:Debug>:-gsource-map>")
+-    target_compile_options(occt-js PUBLIC "$<$<CONFIG:Release>:-Oz>")
++    target_compile_options(occt-js PUBLIC "$<$<CONFIG:Release>:-O3>" "$<$<CONFIG:Release>:-flto=thin>")
++    target_link_options(occt-js PUBLIC "$<$<CONFIG:Release>:-O3>" "$<$<CONFIG:Release>:-flto=thin>")
+     target_compile_options(occt-js PUBLIC -fexceptions)
+     target_compile_options(occt-js PUBLIC -fwasm-exceptions)
+ 
+diff --git a/dist/occt-js.d.ts b/dist/occt-js.d.ts
+index e825e7f..f70265c 100644
+--- a/dist/occt-js.d.ts
++++ b/dist/occt-js.d.ts
+@@ -240,7 +240,17 @@ export type OcctJSStepPartExportResult =
+     | OcctJSStepPartExportSuccess
+     | OcctJSStepPartExportFailure;
+ 
++export interface OcctJSImportTimings {
++    readMs: number;
++    transferMs: number;
++    meshMs: number;
++    extractMs: number;
++    outputMs: number;
++    totalMs: number;
++}
++
+ export interface OcctJSExactOpenResult extends OcctJSResult {
++    timings?: OcctJSImportTimings;
+     exactModelId?: number;
+     exactGeometryBindings?: OcctJSExactGeometryBinding[];
+ }
+@@ -1193,6 +1203,7 @@ export interface OcctJSModule {
+ declare function OcctJS(options?: {
+     locateFile?: (filename: string, scriptDirectory?: string) => string;
+     wasmBinary?: ArrayBuffer | Uint8Array;
++    onProgress?: (stage: "read" | "transfer" | "mesh" | "extract" | "output") => void;
+ }): Promise<OcctJSModule>;
+ 
+ export default OcctJS;
+diff --git a/src/exact-model-store.cpp b/src/exact-model-store.cpp
+index 4213f15..4fd3534 100644
+--- a/src/exact-model-store.cpp
++++ b/src/exact-model-store.cpp
+@@ -4,14 +4,23 @@
+ #include <mutex>
+ #include <unordered_map>
+ #include <unordered_set>
++#include <array>
++#include <TopExp.hxx>
++#include <TopTools_IndexedMapOfShape.hxx>
+ 
+ namespace {
+ 
++struct GeometryTopology {
++    std::array<TopTools_IndexedMapOfShape, 3> shapes;
++    std::array<bool, 3> ready{};
++};
++
+ struct ExactModelStoreState {
+     std::mutex mutex;
+     int nextId = 1;
+     std::unordered_map<int, ExactModelEntry> liveEntries;
+     std::unordered_set<int> releasedEntries;
++    std::unordered_map<int, std::unordered_map<int, GeometryTopology>> topology;
+ };
+ 
+ ExactModelStoreState& State()
+@@ -36,6 +45,33 @@ OcctLifecycleResult MakeFailure(const std::string& code, const std::string& mess
+     return result;
+ }
+ 
++OcctLifecycleResult FindGeometryShape(
++    const ExactModelStoreState& state,
++    int exactModelId,
++    int exactShapeHandle,
++    TopoDS_Shape& geometryShape)
++{
++    auto liveIt = state.liveEntries.find(exactModelId);
++    if (liveIt == state.liveEntries.end()) {
++        if (state.releasedEntries.count(exactModelId) > 0) {
++            return MakeFailure("released-handle", "Exact model handle has already been released.");
++        }
++        return MakeFailure("invalid-handle", "Exact model handle is unknown.");
++    }
++
++    const auto& exactGeometryShapes = liveIt->second.exactGeometryShapes;
++    if (exactShapeHandle <= 0 || exactShapeHandle > static_cast<int>(exactGeometryShapes.size())) {
++        return MakeFailure("invalid-id", "Exact shape handle is out of range for this model.");
++    }
++
++    geometryShape = exactGeometryShapes[exactShapeHandle - 1];
++    if (geometryShape.IsNull()) {
++        return MakeFailure("invalid-id", "Exact shape handle does not reference a retained geometry definition.");
++    }
++
++    return MakeOk();
++}
++
+ } // namespace
+ 
+ ExactModelStore& ExactModelStore::Instance()
+@@ -106,6 +142,7 @@ OcctLifecycleResult ExactModelStore::Release(int exactModelId)
+     if (liveIt->second.refCount <= 0) {
+         state.releasedEntries.insert(exactModelId);
+         state.liveEntries.erase(liveIt);
++        state.topology.erase(exactModelId);
+     }
+ 
+     return MakeOk();
+@@ -137,24 +174,38 @@ OcctLifecycleResult ExactModelStore::GetGeometryShape(
+     auto& state = State();
+     std::lock_guard<std::mutex> lock(state.mutex);
+ 
+-    auto liveIt = state.liveEntries.find(exactModelId);
+-    if (liveIt == state.liveEntries.end()) {
+-        if (state.releasedEntries.count(exactModelId) > 0) {
+-            return MakeFailure("released-handle", "Exact model handle has already been released.");
+-        }
+-        return MakeFailure("invalid-handle", "Exact model handle is unknown.");
+-    }
++    return FindGeometryShape(state, exactModelId, exactShapeHandle, geometryShape);
++}
+ 
+-    const auto& exactGeometryShapes = liveIt->second.exactGeometryShapes;
+-    if (exactShapeHandle <= 0 || exactShapeHandle > static_cast<int>(exactGeometryShapes.size())) {
+-        return MakeFailure("invalid-id", "Exact shape handle is out of range for this model.");
+-    }
+ 
+-    geometryShape = exactGeometryShapes[exactShapeHandle - 1];
+-    if (geometryShape.IsNull()) {
+-        return MakeFailure("invalid-id", "Exact shape handle does not reference a retained geometry definition.");
++OcctLifecycleResult ExactModelStore::GetElementShape(
++    int exactModelId,
++    int exactShapeHandle,
++    TopAbs_ShapeEnum kind,
++    int elementId,
++    TopoDS_Shape& shape)
++{
++    auto& state = State();
++    std::lock_guard<std::mutex> lock(state.mutex);
++    TopoDS_Shape geometry;
++    OcctLifecycleResult status = FindGeometryShape(state, exactModelId, exactShapeHandle, geometry);
++    if (!status.ok) return status;
++
++    const int slot = kind == TopAbs_FACE ? 0 : kind == TopAbs_EDGE ? 1 : 2;
++    const std::string name = slot == 0 ? "face" : slot == 1 ? "edge" : "vertex";
++    auto& topology = state.topology[exactModelId][exactShapeHandle];
++    auto& shapes = topology.shapes[slot];
++    if (!topology.ready[slot]) {
++        TopExp::MapShapes(geometry, kind, shapes);
++        topology.ready[slot] = true;
++    }
++    if (elementId <= 0 || elementId > shapes.Extent()) {
++        return MakeFailure("invalid-id", "Requested " + name + " id is out of range for this exact geometry.");
++    }
++    shape = shapes(elementId);
++    if (shape.IsNull()) {
++        return MakeFailure("invalid-id", "Requested " + name + " id did not resolve to a retained exact " + name + ".");
+     }
+-
+     return MakeOk();
+ }
+ 
+diff --git a/src/exact-model-store.hpp b/src/exact-model-store.hpp
+index db7fcb2..240bdac 100644
+--- a/src/exact-model-store.hpp
++++ b/src/exact-model-store.hpp
+@@ -29,6 +29,7 @@ public:
+     OcctLifecycleResult Release(int exactModelId);
+     OcctLifecycleResult GetEntry(int exactModelId, ExactModelEntry& entry);
+     OcctLifecycleResult GetGeometryShape(int exactModelId, int exactShapeHandle, TopoDS_Shape& geometryShape);
++    OcctLifecycleResult GetElementShape(int exactModelId, int exactShapeHandle, TopAbs_ShapeEnum kind, int elementId, TopoDS_Shape& shape);
+     OcctExactModelDiagnostics GetDiagnostics();
+ 
+ private:
+diff --git a/src/exact-query.cpp b/src/exact-query.cpp
+index adddd1a..9fc7ae9 100644
+--- a/src/exact-query.cpp
++++ b/src/exact-query.cpp
+@@ -122,26 +122,11 @@ OcctLifecycleResult ResolveFace(
+     int elementId,
+     TopoDS_Face& face)
+ {
+-    TopoDS_Shape geometryShape;
+-    OcctLifecycleResult lifecycle = LookupGeometryShape(exactModelId, exactShapeHandle, geometryShape);
+-    if (!lifecycle.ok) {
+-        return lifecycle;
+-    }
+-
+-    TopTools_IndexedMapOfShape faces;
+-    TopExp::MapShapes(geometryShape, TopAbs_FACE, faces);
+-    if (elementId <= 0 || elementId > faces.Extent()) {
+-        return MakeFailure<OcctLifecycleResult>("invalid-id", "Requested face id is out of range for this exact geometry.");
+-    }
+-
+-    face = TopoDS::Face(faces(elementId));
+-    if (face.IsNull()) {
+-        return MakeFailure<OcctLifecycleResult>("invalid-id", "Requested face id did not resolve to a retained exact face.");
+-    }
+-
+-    OcctLifecycleResult ok;
+-    ok.ok = true;
+-    return ok;
++    TopoDS_Shape shape;
++    OcctLifecycleResult status = ExactModelStore::Instance().GetElementShape(
++        exactModelId, exactShapeHandle, TopAbs_FACE, elementId, shape);
++    if (status.ok) face = TopoDS::Face(shape);
++    return status;
+ }
+ 
+ OcctLifecycleResult ResolveEdge(
+@@ -150,26 +135,11 @@ OcctLifecycleResult ResolveEdge(
+     int elementId,
+     TopoDS_Edge& edge)
+ {
+-    TopoDS_Shape geometryShape;
+-    OcctLifecycleResult lifecycle = LookupGeometryShape(exactModelId, exactShapeHandle, geometryShape);
+-    if (!lifecycle.ok) {
+-        return lifecycle;
+-    }
+-
+-    TopTools_IndexedMapOfShape edges;
+-    TopExp::MapShapes(geometryShape, TopAbs_EDGE, edges);
+-    if (elementId <= 0 || elementId > edges.Extent()) {
+-        return MakeFailure<OcctLifecycleResult>("invalid-id", "Requested edge id is out of range for this exact geometry.");
+-    }
+-
+-    edge = TopoDS::Edge(edges(elementId));
+-    if (edge.IsNull()) {
+-        return MakeFailure<OcctLifecycleResult>("invalid-id", "Requested edge id did not resolve to a retained exact edge.");
+-    }
+-
+-    OcctLifecycleResult ok;
+-    ok.ok = true;
+-    return ok;
++    TopoDS_Shape shape;
++    OcctLifecycleResult status = ExactModelStore::Instance().GetElementShape(
++        exactModelId, exactShapeHandle, TopAbs_EDGE, elementId, shape);
++    if (status.ok) edge = TopoDS::Edge(shape);
++    return status;
+ }
+ 
+ OcctLifecycleResult ResolveVertex(
+@@ -178,26 +148,11 @@ OcctLifecycleResult ResolveVertex(
+     int elementId,
+     TopoDS_Vertex& vertex)
+ {
+-    TopoDS_Shape geometryShape;
+-    OcctLifecycleResult lifecycle = LookupGeometryShape(exactModelId, exactShapeHandle, geometryShape);
+-    if (!lifecycle.ok) {
+-        return lifecycle;
+-    }
+-
+-    TopTools_IndexedMapOfShape vertices;
+-    TopExp::MapShapes(geometryShape, TopAbs_VERTEX, vertices);
+-    if (elementId <= 0 || elementId > vertices.Extent()) {
+-        return MakeFailure<OcctLifecycleResult>("invalid-id", "Requested vertex id is out of range for this exact geometry.");
+-    }
+-
+-    vertex = TopoDS::Vertex(vertices(elementId));
+-    if (vertex.IsNull()) {
+-        return MakeFailure<OcctLifecycleResult>("invalid-id", "Requested vertex id did not resolve to a retained exact vertex.");
+-    }
+-
+-    OcctLifecycleResult ok;
+-    ok.ok = true;
+-    return ok;
++    TopoDS_Shape shape;
++    OcctLifecycleResult status = ExactModelStore::Instance().GetElementShape(
++        exactModelId, exactShapeHandle, TopAbs_VERTEX, elementId, shape);
++    if (status.ok) vertex = TopoDS::Vertex(shape);
++    return status;
+ }
+ 
+ OcctLifecycleResult ResolveElementShape(
+diff --git a/src/import-progress.hpp b/src/import-progress.hpp
+new file mode 100644
+index 0000000..1881e20
+--- /dev/null
++++ b/src/import-progress.hpp
+@@ -0,0 +1,10 @@
++#pragma once
++
++#include <emscripten.h>
++
++inline void ImportProgress(const char* stage)
++{
++    EM_ASM({
++        if (Module['onProgress']) Module['onProgress'](UTF8ToString($0));
++    }, stage);
++}
+diff --git a/src/importer-utils.cpp b/src/importer-utils.cpp
+index b031c2b..90c2fae 100644
+--- a/src/importer-utils.cpp
++++ b/src/importer-utils.cpp
+@@ -161,6 +161,24 @@ OcctMeshData ExtractMeshFromShape(const TopoDS_Shape& shape)
+     TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+     TopExp::MapShapes(shape, TopAbs_VERTEX, vertexMap);
+ 
++    size_t vertexCount = 0;
++    size_t indexCount = 0;
++    for (int fi = 1; fi <= faceMap.Extent(); ++fi) {
++        TopLoc_Location location;
++        const auto& triangles = BRep_Tool::Triangulation(TopoDS::Face(faceMap(fi)), location);
++        if (!triangles.IsNull() && triangles->NbTriangles() > 0) {
++            vertexCount += triangles->NbNodes();
++            indexCount += static_cast<size_t>(triangles->NbTriangles()) * 3;
++        }
++    }
++    mesh.positions.reserve(vertexCount * 3);
++    mesh.normals.reserve(vertexCount * 3);
++    mesh.indices.reserve(indexCount);
++    mesh.triangleToFaceMap.reserve(indexCount / 3);
++    mesh.faces.reserve(faceMap.Extent());
++    mesh.edges.reserve(edgeMap.Extent());
++    mesh.vertices.reserve(vertexMap.Extent());
++
+     // Phase 1: Extract faces
+     for (int fi = 1; fi <= faceMap.Extent(); ++fi) {
+         const TopoDS_Face& face = TopoDS::Face(faceMap(fi));
+@@ -173,32 +191,33 @@ OcctMeshData ExtractMeshFromShape(const TopoDS_Shape& shape)
+         faceData.indexCount = static_cast<uint32_t>(mesh.indices.size()) - faceData.firstIndex;
+ 
+         uint32_t triCount = faceData.indexCount / 3;
+-        for (uint32_t t = 0; t < triCount; ++t) {
+-            mesh.triangleToFaceMap.push_back(fi);
+-        }
++        mesh.triangleToFaceMap.insert(mesh.triangleToFaceMap.end(), triCount, fi);
+ 
+         mesh.faces.push_back(std::move(faceData));
+     }
+ 
++    // Build edge ownership once. Walking all faces for every edge is quadratic.
++    std::vector<std::vector<int>> edgeOwners(edgeMap.Extent());
++    for (int fi = 1; fi <= faceMap.Extent(); ++fi) {
++        auto& edgeIndices = mesh.faces[fi - 1].edgeIndices;
++        for (TopExp_Explorer ex(faceMap(fi), TopAbs_EDGE); ex.More(); ex.Next()) {
++            const int edgeIndex = edgeMap.FindIndex(ex.Current()) - 1;
++            if (edgeIndex < 0) continue;
++            auto& owners = edgeOwners[edgeIndex];
++            if (owners.empty() || owners.back() != fi) {
++                owners.push_back(fi);
++                edgeIndices.push_back(edgeIndex);
++            }
++        }
++    }
++
+     // Phase 2: Extract edges
+     for (int ei = 1; ei <= edgeMap.Extent(); ++ei) {
+         const TopoDS_Edge& edge = TopoDS::Edge(edgeMap(ei));
+         OcctEdgeTopoData edgeData;
+         edgeData.id = ei;
+ 
+-        for (int fi = 1; fi <= faceMap.Extent(); ++fi) {
+-            const TopoDS_Face& face = TopoDS::Face(faceMap(fi));
+-            bool edgeOnFace = false;
+-            for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+-                if (edgeMap.FindIndex(ex.Current()) == ei) {
+-                    edgeOnFace = true;
+-                    break;
+-                }
+-            }
+-            if (!edgeOnFace) continue;
+-
+-            edgeData.ownerFaceIds.push_back(fi);
+-        }
++        edgeData.ownerFaceIds = std::move(edgeOwners[ei - 1]);
+ 
+         if (BRep_Tool::Degenerated(edge)) {
+             edgeData.isFreeEdge = edgeData.ownerFaceIds.empty();
+@@ -223,6 +242,7 @@ OcctMeshData ExtractMeshFromShape(const TopoDS_Shape& shape)
+ 
+             gp_Trsf trsf = faceLoc.Transformation();
+             const TColStd_Array1OfInteger& nodeIndices = polyOnTri->Nodes();
++            edgeData.points.reserve(static_cast<size_t>(nodeIndices.Length()) * 3);
+             for (int i = nodeIndices.Lower(); i <= nodeIndices.Upper(); ++i) {
+                 gp_Pnt pt = triangulation->Node(nodeIndices(i));
+                 pt.Transform(trsf);
+@@ -240,6 +260,7 @@ OcctMeshData ExtractMeshFromShape(const TopoDS_Shape& shape)
+             if (!poly3d.IsNull()) {
+                 gp_Trsf trsf = loc.Transformation();
+                 const TColgp_Array1OfPnt& nodes = poly3d->Nodes();
++                edgeData.points.reserve(static_cast<size_t>(nodes.Length()) * 3);
+                 for (int i = nodes.Lower(); i <= nodes.Upper(); ++i) {
+                     gp_Pnt p = nodes(i);
+                     p.Transform(trsf);
+@@ -254,21 +275,6 @@ OcctMeshData ExtractMeshFromShape(const TopoDS_Shape& shape)
+         mesh.edges.push_back(std::move(edgeData));
+     }
+ 
+-    // Phase 3: Backfill face edgeIndices
+-    for (int fi = 1; fi <= faceMap.Extent(); ++fi) {
+-        const TopoDS_Face& face = TopoDS::Face(faceMap(fi));
+-        OcctFaceTopoData& faceData = mesh.faces[fi - 1];
+-        for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+-            int edgeIdx = edgeMap.FindIndex(ex.Current());
+-            if (edgeIdx >= 1) {
+-                int zeroBasedIdx = edgeIdx - 1;
+-                if (std::find(faceData.edgeIndices.begin(), faceData.edgeIndices.end(), zeroBasedIdx) == faceData.edgeIndices.end()) {
+-                    faceData.edgeIndices.push_back(zeroBasedIdx);
+-                }
+-            }
+-        }
+-    }
+-
+     // Phase 4: Extract B-Rep vertices
+     for (int vi = 1; vi <= vertexMap.Extent(); ++vi) {
+         const TopoDS_Vertex& vertex = TopoDS::Vertex(vertexMap(vi));
+diff --git a/src/importer-xde.cpp b/src/importer-xde.cpp
+index 4829347..13fd09f 100644
+--- a/src/importer-xde.cpp
++++ b/src/importer-xde.cpp
+@@ -1,6 +1,7 @@
+ #include "importer-xde.hpp"
+ #include "importer-iges-staging.hpp"
+ #include "importer-utils.hpp"
++#include "import-progress.hpp"
+ 
+ #include <streambuf>
+ #include <istream>
+@@ -41,6 +42,7 @@
+ #include <IFSelect_ReturnStatus.hxx>
+ #include <TopoDS.hxx>
+ #include <UnitsMethods.hxx>
++#include <TNaming_Tool.hxx>
+ 
+ namespace {
+ 
+@@ -700,7 +702,13 @@ void ExtractShapeMeshes(const TopoDS_Shape& shape,
+         for (int fi = 1; fi <= localFaceMap.Extent(); ++fi) {
+             if (fi - 1 < static_cast<int>(meshData.faces.size())) {
+                 OcctColor faceColor;
+-                if (GetShapeColor(localFaceMap(fi), shapeTool, colorTool, faceColor)) {
++                const TopoDS_Shape& face = localFaceMap(fi);
++                const bool hasLabel = TNaming_Tool::HasLabel(shapeTool->Label(), face)
++                    || (!face.Location().IsIdentity()
++                        && TNaming_Tool::HasLabel(shapeTool->Label(), face.Located(TopLoc_Location())));
++                // Unlabeled faces have no face color. Existing labels still use
++                // XDE's resolution of locations and shared subshapes.
++                if (hasLabel && GetShapeColor(face, shapeTool, colorTool, faceColor)) {
+                     meshData.faces[fi - 1].color = params.ResolveImportedColor(faceColor);
+                 } else {
+                     meshData.faces[fi - 1].color = params.ResolveImportedColor(shapeColor);
+@@ -859,7 +867,8 @@ bool ReadAndTransferXde(const uint8_t* data,
+                         const ImportParams& params,
+                         const std::string& format,
+                         const Handle(TDocStd_Document)& doc,
+-                        std::string& outError)
++                        std::string& outError,
++                        ImportTimings* timings = nullptr)
+ {
+     Standard_ArrayStreamBuffer streamBuf(
+         reinterpret_cast<const char*>(data),
+@@ -867,20 +876,34 @@ bool ReadAndTransferXde(const uint8_t* data,
+     std::istream istream(&streamBuf);
+ 
+     if (format == "step") {
++        ImportProgress("read");
++        double started = emscripten_get_now();
+         STEPCAFControl_Reader cafReader;
+         cafReader.SetColorMode(params.ShouldReadSourceColors());
+         cafReader.SetNameMode(params.readNames);
++        // These XDE attributes are never exported or queried by the viewer.
++        cafReader.SetLayerMode(false);
++        cafReader.SetPropsMode(false);
++        cafReader.SetGDTMode(false);
++        cafReader.SetMatMode(false);
++        cafReader.SetViewMode(false);
++        cafReader.SetMetaMode(false);
+ 
+         STEPControl_Reader& reader = cafReader.ChangeReader();
+         IFSelect_ReturnStatus readStatus = reader.ReadStream(
+             fileName.empty() ? "input.stp" : fileName.c_str(),
+             istream);
+ 
++        if (timings) timings->readMs = emscripten_get_now() - started;
+         if (readStatus != IFSelect_RetDone) {
+             outError = "STEP reader failed to parse the file.";
+             return false;
+         }
+-        if (!cafReader.Transfer(doc)) {
++        ImportProgress("transfer");
++        started = emscripten_get_now();
++        const bool transferred = cafReader.Transfer(doc);
++        if (timings) timings->transferMs = emscripten_get_now() - started;
++        if (!transferred) {
+             outError = "Failed to transfer STEP data to XDE document.";
+             return false;
+         }
+@@ -1181,7 +1204,7 @@ OcctExactImportData ImportExactXdeFromMemory(
+         XCAFDoc_DocumentTool::SetLengthUnit(doc, 1.0, LinearUnitToLengthUnit(params.linearUnit));
+ 
+         std::string readError;
+-        if (!ReadAndTransferXde(data, size, fileName, params, format, doc, readError)) {
++        if (!ReadAndTransferXde(data, size, fileName, params, format, doc, readError, &scene.timings)) {
+             scene.error = readError;
+             app->Close(doc);
+             return imported;
+@@ -1201,6 +1224,8 @@ OcctExactImportData ImportExactXdeFromMemory(
+             return imported;
+         }
+ 
++        ImportProgress("mesh");
++        double started = emscripten_get_now();
+         TDF_Label mainLabel = shapeTool->Label();
+         for (TDF_ChildIterator it(mainLabel); it.More(); it.Next()) {
+             TDF_Label childLabel = it.Value();
+@@ -1212,6 +1237,9 @@ OcctExactImportData ImportExactXdeFromMemory(
+             }
+         }
+ 
++        scene.timings.meshMs = emscripten_get_now() - started;
++        ImportProgress("extract");
++        started = emscripten_get_now();
+         AppendRootNodes(freeShapes, shapeTool, colorTool, params, scene, &imported.exactGeometryShapes);
+         imported.exactShape = BuildExactRootShape(freeShapes, shapeTool);
+         if (imported.exactShape.IsNull()) {
+@@ -1225,6 +1253,7 @@ OcctExactImportData ImportExactXdeFromMemory(
+             return imported;
+         }
+ 
++        scene.timings.extractMs = emscripten_get_now() - started;
+         scene.success = true;
+         app->Close(doc);
+     }
+diff --git a/src/importer.hpp b/src/importer.hpp
+index d609e66..2fbff81 100644
+--- a/src/importer.hpp
++++ b/src/importer.hpp
+@@ -68,7 +68,15 @@ struct OcctNodeData {
+     std::vector<int>       childIndices;
+ };
+ 
++struct ImportTimings {
++    double readMs = 0;
++    double transferMs = 0;
++    double meshMs = 0;
++    double extractMs = 0;
++};
++
+ struct OcctSceneData {
++    ImportTimings timings;
+     bool                       success = false;
+     std::string                error;
+     std::vector<OcctNodeData>  nodes;
+diff --git a/src/js-interface.cpp b/src/js-interface.cpp
+index 272054b..27a8fff 100644
+--- a/src/js-interface.cpp
++++ b/src/js-interface.cpp
+@@ -9,6 +9,7 @@
+ #include <cmath>
+ 
+ #include "importer-step.hpp"
++#include "import-progress.hpp"
+ #include "importer-iges.hpp"
+ #include "importer-brep.hpp"
+ #include "composite-shape.hpp"
+@@ -1822,6 +1823,7 @@ val ReadByFormat(const std::string& format, const val& content, const val& jsPar
+ 
+ val OpenExactByFormat(const std::string& format, const val& content, const val& jsParams)
+ {
++    const double started = emscripten_get_now();
+     std::vector<uint8_t> buffer = ExtractBytes(content);
+     ImportParams params = ParseImportParams(jsParams);
+ 
+@@ -1870,9 +1872,19 @@ val OpenExactByFormat(const std::string& format, const val& content, const val&
+         return BuildResult(imported.scene, normalizedFormat);
+     }
+ 
++    ImportProgress("output");
++    const double outputStarted = emscripten_get_now();
+     val result = BuildResult(imported.scene, normalizedFormat);
+     result.set("exactModelId", exactModelId);
+     result.set("exactGeometryBindings", ExactGeometryBindingsToVal(imported.exactGeometryShapes.size()));
++    val timings = val::object();
++    timings.set("readMs", imported.scene.timings.readMs);
++    timings.set("transferMs", imported.scene.timings.transferMs);
++    timings.set("meshMs", imported.scene.timings.meshMs);
++    timings.set("extractMs", imported.scene.timings.extractMs);
++    timings.set("outputMs", emscripten_get_now() - outputStarted);
++    timings.set("totalMs", emscripten_get_now() - started);
++    result.set("timings", timings);
+     return result;
+ }
+ 
+diff --git a/test/import_performance_contract.test.mjs b/test/import_performance_contract.test.mjs
+new file mode 100644
+index 0000000..a830b78
+--- /dev/null
++++ b/test/import_performance_contract.test.mjs
+@@ -0,0 +1,40 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { readFile } from 'node:fs/promises';
++import { loadOcctFactory } from './load_occt_factory.mjs';
++
++const factory = loadOcctFactory();
++
++test('STEP import reports native phases and independent elapsed timings', async () => {
++  const phases = [];
++  const module = await factory({ onProgress: (phase) => phases.push(phase) });
++  const bytes = new Uint8Array(await readFile(new URL('./assembly.step', import.meta.url)));
++  const result = module.OpenExactStepModel(bytes, {});
++  assert.equal(result.success, true);
++  assert.deepEqual(phases, ['read', 'transfer', 'mesh', 'extract', 'output']);
++  for (const phase of ['readMs', 'transferMs', 'meshMs', 'extractMs', 'outputMs', 'totalMs']) {
++    assert.ok(Number.isFinite(result.timings[phase]) && result.timings[phase] >= 0, phase);
++  }
++  const accounted = Object.entries(result.timings).reduce((sum, [key, value]) => sum + (key === 'totalMs' ? 0 : value), 0);
++  assert.ok(result.timings.totalMs >= accounted);
++  assert.equal(module.ReleaseExactModel(result.exactModelId).ok, true);
++});
++
++test('mesh edge ownership agrees with each face boundary, including seam edges', async () => {
++  const module = await factory();
++  const bytes = new Uint8Array(await readFile(new URL('./ANC101_colored.stp', import.meta.url)));
++  const result = module.OpenExactStepModel(bytes, {});
++  assert.equal(result.success, true);
++  for (const geometry of result.geometries) {
++    for (const face of geometry.faces) {
++      assert.equal(new Set(face.edgeIndices).size, face.edgeIndices.length);
++      for (const index of face.edgeIndices) assert.ok(geometry.edges[index].ownerFaceIds.includes(face.id));
++    }
++    for (const [index, edge] of geometry.edges.entries()) {
++      assert.equal(new Set(edge.ownerFaceIds).size, edge.ownerFaceIds.length);
++      assert.equal(edge.isFreeEdge, edge.ownerFaceIds.length === 0);
++      for (const owner of edge.ownerFaceIds) assert.ok(geometry.faces.find((face) => face.id === owner).edgeIndices.includes(index));
++    }
++  }
++  assert.equal(module.ReleaseExactModel(result.exactModelId).ok, true);
++});
+diff --git a/tools/generate_esm_runtime_entry.mjs b/tools/generate_esm_runtime_entry.mjs
+index acd0ab2..05f679a 100644
+--- a/tools/generate_esm_runtime_entry.mjs
++++ b/tools/generate_esm_runtime_entry.mjs
+@@ -8,12 +8,12 @@ const esmPath = path.join(repoRoot, "dist", "occt-js.mjs");
+ 
+ const cjsSource = readFileSync(cjsPath, "utf8");
+ 
+-const umdFooterPattern = /\r?\nif \(typeof exports === 'object' && typeof module === 'object'\)\r?\n  module\.exports = OcctJS;\r?\nelse if \(typeof define === 'function' && define\['amd'\]\)\r?\n  define\(\[\], \(\) => OcctJS\);\s*$/;
+-if (!umdFooterPattern.test(cjsSource)) {
+-  throw new Error(`Could not find expected UMD footer in ${cjsPath}.`);
++const footerStart = cjsSource.lastIndexOf("\nif (typeof exports === 'object' && typeof module === 'object') {");
++if (footerStart < 0) {
++  throw new Error(`Could not find expected Emscripten 4.0.10 footer in ${cjsPath}.`);
+ }
+ 
+-let esmSource = cjsSource.replace(umdFooterPattern, "\n");
++let esmSource = cjsSource.slice(0, footerStart) + "\n";
+ 
+ const scriptNamePattern = /var _scriptName = typeof document != 'undefined' \? document\.currentScript\?\.src : undefined;/;
+ if (!scriptNamePattern.test(esmSource)) {

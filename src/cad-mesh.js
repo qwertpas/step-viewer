@@ -121,29 +121,36 @@ function repairPlane(occt, modelId, handle, geometry, face) {
 }
 
 function addFace(geometry, face, vertices, faceNormals, triangles) {
-  const positions = Array.from(geometry.positions);
-  const normals = Array.from(geometry.normals);
-  const firstVertex = positions.length / 3;
+  const firstVertex = geometry.positions.length / 3;
+  const positions = new Float32Array(geometry.positions.length + vertices.length * 3);
+  const normals = new Float32Array(geometry.normals.length + vertices.length * 3);
+  positions.set(geometry.positions);
+  normals.set(geometry.normals);
   vertices.forEach((point, i) => {
-    positions.push(...point.toArray());
-    normals.push(...faceNormals[i].toArray());
+    point.toArray(positions, (firstVertex + i) * 3);
+    faceNormals[i].toArray(normals, (firstVertex + i) * 3);
   });
-  const added = [];
-  for (const triangle of triangles) {
+  const added = new Uint32Array(triangles.length * 3);
+  for (const [i, triangle] of triangles.entries()) {
     const [a, b, c] = triangle.map((id) => vertices[id]);
     const normal = b.clone().sub(a).cross(c.clone().sub(a));
     if (normal.dot(faceNormals[triangle[0]]) < 0) triangle.reverse();
-    added.push(...triangle.map((id) => firstVertex + id));
+    for (let j = 0; j < 3; j++) added[i * 3 + j] = firstVertex + triangle[j];
   }
   if (!added.length) throw new Error(`Cannot triangulate CAD face ${face.id}`);
-  const indices = Array.from(geometry.indices);
-  indices.splice(face.firstIndex, 0, ...added);
-  const mapping = Array.from(geometry.triangleToFaceMap);
-  mapping.splice(face.firstIndex / 3, 0, ...Array(added.length / 3).fill(face.id));
+  const indices = new Uint32Array(geometry.indices.length + added.length);
+  indices.set(geometry.indices.subarray(0, face.firstIndex));
+  indices.set(added, face.firstIndex);
+  indices.set(geometry.indices.subarray(face.firstIndex), face.firstIndex + added.length);
+  const mapping = new Int32Array(geometry.triangleToFaceMap.length + triangles.length);
+  const firstTriangle = face.firstIndex / 3;
+  mapping.set(geometry.triangleToFaceMap.subarray(0, firstTriangle));
+  mapping.fill(face.id, firstTriangle, firstTriangle + triangles.length);
+  mapping.set(geometry.triangleToFaceMap.subarray(firstTriangle), firstTriangle + triangles.length);
   for (const other of geometry.faces) if (other !== face && other.firstIndex >= face.firstIndex) other.firstIndex += added.length;
   face.indexCount = added.length;
-  geometry.positions = new Float32Array(positions);
-  geometry.normals = new Float32Array(normals);
-  geometry.indices = new Uint32Array(indices);
-  geometry.triangleToFaceMap = new Int32Array(mapping);
+  geometry.positions = positions;
+  geometry.normals = normals;
+  geometry.indices = indices;
+  geometry.triangleToFaceMap = mapping;
 }

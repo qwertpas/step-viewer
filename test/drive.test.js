@@ -68,6 +68,43 @@ test("a completed identical upload is reused on later shares and retries", async
   assert.equal(responses.length, 0);
 });
 
+test("sharing reuses the import hash without reading the original file again", async (t) => {
+  const original = new File(["CAD geometry"], "large.step");
+  t.mock.method(original, "arrayBuffer", () => { throw new Error("The import already hashed this file"); });
+  const hash = "b".repeat(64);
+  let searches = 0;
+  const drive = new Drive({ apiKey: "key", fetch: async (url) => {
+    const request = new URL(url);
+    if (request.searchParams.has("q")) {
+      const query = request.searchParams.get("q");
+      if (query.includes("sha256")) { assert.ok(query.includes(hash)); searches++; return json({ files: [{ id: "cad123" }] }); }
+      return json({ files: [{ id: "folder1" }] });
+    }
+    if (request.pathname.endsWith("/permissions")) return json({});
+    return request.searchParams.get("fields") === "id,resourceKey" ? json({ id: "cad123" }) : json(info);
+  } });
+  await drive.share(original, () => {}, hash);
+  await drive.share(original, () => {});
+  assert.equal(searches, 2, "each share still verifies that the upload exists and checks its public access");
+});
+
+test("folder lookup runs while file hashing is pending and concurrent digest requests share one read", async (t) => {
+  const original = new File(["CAD geometry"], "large.step");
+  let finishRead;
+  const read = t.mock.method(original, "arrayBuffer", () => new Promise((resolve) => { finishRead = resolve; }));
+  const responses = [json({ files: [{ id: "folder1" }] }), json({ files: [{ id: "cad123" }] }), json({}), json({ id: "cad123" }), json(info)];
+  let requests = 0;
+  const drive = new Drive({ apiKey: "key", fetch: async () => { requests++; return responses.shift(); } });
+  const sharing = drive.share(original, () => {});
+  const digest = drive.hash(original);
+  assert.equal(requests, 1, "folder lookup does not wait for the file read or digest");
+  assert.equal(read.mock.callCount(), 1);
+  finishRead(new TextEncoder().encode("CAD geometry").buffer);
+  assert.match(await digest, /^[a-f0-9]{64}$/);
+  await sharing;
+  assert.equal(requests, 5);
+});
+
 test("recipient downloads original bytes without account, cookies, or access token", async () => {
   let count = 0;
   const drive = new Drive({ apiKey: "public-key", fetch: async (url, options) => {

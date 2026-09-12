@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
+import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
 import OcctJS from "@tx-code/occt-js";
 import { facePlane } from "../src/cad.js";
 import { axisPosition, cutBounds, kept, pickSurfaces, worldPlane } from "../src/section-math.js";
@@ -73,13 +74,17 @@ test("section axes stay fixed and transform with the CAD instance", () => {
 
 test("clipped surfaces and opaque caps block selection, including holes between parts", () => {
   const surface = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), Array.from({ length: 6 }, () => new THREE.MeshBasicMaterial()));
+  surface.geometry.boundsTree = new MeshBVH(surface.geometry, { indirect: true });
+  surface.raycast = acceleratedRaycast;
   surface.updateMatrixWorld();
-  const parts = [{ surface }];
+  const parts = [{ surface, bounds: new THREE.Box3().setFromObject(surface, true) }];
   const ray = new THREE.Raycaster(new THREE.Vector3(0, 0, 5), new THREE.Vector3(0, 0, -1));
+  ray.firstHitOnly = true;
   const planes = [new THREE.Plane(new THREE.Vector3(0, 0, -1), 0)];
   assert.equal(pickSurfaces(ray, parts, []).hit.distance, 4);
   assert.equal(pickSurfaces(ray, parts, planes).hit, undefined);
   assert.equal(pickSurfaces(ray, parts, planes).limit, 5);
+  assert.equal(ray.firstHitOnly, true);
   assert.ok(surface.material.every((material) => material.side === THREE.FrontSide));
   assert.equal(kept(new THREE.Vector3(0, 0, 1), planes), false);
   ray.ray.origin.x = 2;

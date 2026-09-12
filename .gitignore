@@ -1,8 +1,11 @@
 node_modules/
 dist/
+!vendor/occt-js/dist/
 .vite/
 .sites-runtime/
 coverage/
+test-results/
+playwright-report/
 *.log
 
 .DS_Store

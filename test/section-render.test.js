@@ -30,6 +30,7 @@ test("solid section fills and outlines follow cut, Flip, visibility and Clear", 
         surface, edge: new THREE.LineSegments(geometry, new THREE.LineBasicMaterial()),
         data: { color: {}, triangleToFaceMap: Array(12).fill(0) }, handle: index,
         transform: surface.matrix.toArray(),
+        bounds: new THREE.Box3().setFromObject(surface, true),
       };
     });
     const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 100);
@@ -45,6 +46,7 @@ test("solid section fills and outlines follow cut, Flip, visibility and Clear", 
       redraw() {}, onEdit() {},
     });
     section.setParts();
+    assert.equal(scene.children.find((item) => item.isGroup).children.length, 0, "section meshes are created only when cutting");
     elements.get("#section").events.click();
     const event = { button: 0, clientX: 50, clientY: 50 };
     canvas.events.pointerdown(event);
@@ -71,8 +73,10 @@ test("solid section fills and outlines follow cut, Flip, visibility and Clear", 
       assert.equal(fill.material.depthWrite, true);
       assert.equal(fill.material.transparent, false);
     }
+    const geometry = fills[0].geometry;
     elements.get("#section-flip").events.click();
     section.update();
+    assert.equal(fills[0].geometry, geometry, "flipping reuses the section geometry");
     assert.equal(parts[2].surface.layers.mask, 1);
     parts[0].surface.visible = false;
     section.update();

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>STEP viewer regression checks</title>
+<style>
+body{margin:18px;font:15px system-ui;color:#17212b;background:#f5f7fa}h1{font-size:24px;margin:0 0 8px}p{max-width:1150px;margin:8px 0}a{color:#155dbe}button{font:600 16px system-ui;padding:10px 20px;margin:10px 0;border:1px solid #1663c4;border-radius:8px;color:white;background:#1663c4}button:disabled{opacity:.55}#status{font-weight:600;margin:8px 0}#stage{position:relative;width:100%;max-width:1440px;height:900px;overflow:hidden;background:#e8eaed;border:1px solid #aab6c3}iframe{display:block;width:1440px;height:900px;border:0;transform-origin:0 0}ol{padding-left:24px;margin:12px 0}li{margin:7px 0}.pass{color:#126738}.fail{color:#b3261e}.running{color:#165db5}#json{white-space:pre-wrap;font-size:12px;background:white;padding:12px;border:1px solid #ccd4de}details{margin:14px 0}.note{font-size:13px;color:#4e6073}
+</style></head><body>
+<h1>STEP viewer regression checks</h1>
+<p>Run the four application checks in the visible optimized viewer. Only the included public bracket fixtures are used. The iframe stays at 1440 × 900 and scales to fit this page.</p>
+<a href="/">Back to browser benchmark</a><br>
+<button id="run">Run regression checks</button>
+<div id="status" role="status" aria-live="polite">Ready. Click Run regression checks.</div>
+<ol id="cases"></ol>
+<div id="stage"></div>
+<p class="note">This local page sends file-input, keyboard, and coordinate-based DOM pointer events to the real viewer. Synthetic pointer capture is emulated in the harness; native OS gestures and pointer dragging are not tested. No external browser automation is used.</p>
+<details open><summary>JSON report</summary><pre id="json">No results yet.</pre></details>
+<script type="module" src="/regression.js"></script></body></html>

@@ -1,0 +1,47 @@
+--- a/src/main.js
++++ b/src/main.js
+@@ -297,6 +297,8 @@
+     return;
+   }
+ 
++  performance.clearMarks(); performance.clearMeasures();
++  performance.mark("cad-load-start");
+   status.textContent = "Reading geometry…";
+   empty.hidden = true;
+   setBusy(true);
+@@ -306,6 +308,7 @@
+   try {
+     nextCad = new CadClient();
+     const result = await nextCad.request("open", { buffer: await file.arrayBuffer() });
++    performance.mark("cad-import-end");
+     const next = buildParts(result, file.name);
+ 
+     selection.reset();
+@@ -342,6 +345,11 @@
+     currentFile = file;
+     sharing.setFile(file, sharedUrl);
+     if (!sharedUrl && window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
++    await new Promise(requestAnimationFrame);
++    performance.mark("cad-load-end");
++    performance.measure("cad-import", "cad-load-start", "cad-import-end");
++    performance.measure("cad-display", "cad-import-end", "cad-load-end");
++    performance.measure("cad-load", "cad-load-start", "cad-load-end");
+   } catch (error) {
+     nextCad?.close();
+     console.error(error);
+--- a/index.html
++++ b/index.html
+@@ -102,5 +102,12 @@
+       </div>
+     </main>
+     <script type="module" src="/src/main.js"></script>
+-  </body>
++  <script>
++const results=document.createElement('pre');
++results.id='benchmark-results';
++results.style.cssText='position:fixed;bottom:60px;left:270px;z-index:100;background:white;padding:10px;pointer-events:none;color:black;font:14px monospace';
++document.body.append(results);
++new PerformanceObserver(()=>{results.textContent=performance.getEntriesByType('measure').filter(e=>e.name.startsWith('cad-')).map(e=>e.name+': '+e.duration.toFixed(1)+' ms').join('\n');}).observe({entryTypes:['measure']});
++</script>
++</body>
+ </html>

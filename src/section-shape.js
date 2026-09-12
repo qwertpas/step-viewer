@@ -1,13 +1,13 @@
 import * as THREE from "three";
+import { MeshBVH } from "three-mesh-bvh";
 
 // Build a camera-independent cross-section. Weld CAD face seams before tracing
 // the loops; imported faces often have separate, slightly rounded vertices.
 export function sectionShape(geometry, transform) {
-  const position = geometry.getAttribute("position");
-  const index = geometry.index;
-  const points = Array.from({ length: position.count }, (_, i) => new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(transform));
-  const box = new THREE.Box3().setFromPoints(points);
+  geometry.boundsTree ||= new MeshBVH(geometry, { indirect: true });
+  const box = geometry.boundingBox.clone().applyMatrix4(transform);
   const tolerance = Math.max(box.getSize(new THREE.Vector3()).length() * 1e-6, 1e-6);
+  const localPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0).applyMatrix4(transform.clone().invert());
   const nodes = [];
   const buckets = new Map();
   function node(point) {
@@ -24,21 +24,38 @@ export function sectionShape(geometry, transform) {
     buckets.get(key).push(id);
     return id;
   }
-  const count = index ? index.count : position.count;
-  for (let i = 0; i < count; i += 3) {
-    const triangle = [0, 1, 2].map((j) => points[index ? index.getX(i + j) : i + j]);
-    const crossings = [];
-    for (let j = 0; j < 3; j++) {
-      const a = triangle[j], b = triangle[(j + 1) % 3];
-      if ((a.z < 0) === (b.z < 0)) continue;
-      const t = a.z / (a.z - b.z);
-      crossings.push(new THREE.Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
+  function crossing(a, b) {
+    const t = a.z / (a.z - b.z);
+    return node(new THREE.Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
+  }
+  const candidates = [];
+  const matrix = transform.elements;
+  const below = (point) => matrix[2] * point.x + matrix[6] * point.y + matrix[10] * point.z + matrix[14] < 0;
+  geometry.boundsTree.shapecast({
+    intersectsBounds: (bounds) => bounds.intersectsPlane(localPlane),
+    intersectsTriangle(triangle, index) {
+      const a = below(triangle.a), b = below(triangle.b), c = below(triangle.c);
+      if (a !== b || b !== c) candidates.push(index);
+      return false;
+    },
+  });
+  // Keep welding deterministic at CAD seams even though the tree visits triangles spatially.
+  candidates.sort((a, b) => a - b);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const position = geometry.getAttribute("position"), index = geometry.index;
+  for (const triangle of candidates) {
+    const i = triangle * 3;
+    a.fromBufferAttribute(position, index ? index.getX(i) : i).applyMatrix4(transform);
+    b.fromBufferAttribute(position, index ? index.getX(i + 1) : i + 1).applyMatrix4(transform);
+    c.fromBufferAttribute(position, index ? index.getX(i + 2) : i + 2).applyMatrix4(transform);
+    const ab = (a.z < 0) !== (b.z < 0), bc = (b.z < 0) !== (c.z < 0), ca = (c.z < 0) !== (a.z < 0);
+    if (!ab && !bc) continue;
+    const first = ab ? crossing(a, b) : crossing(b, c);
+    const second = ca ? crossing(c, a) : crossing(b, c);
+    if (first !== second) {
+      nodes[first].links.add(second);
+      nodes[second].links.add(first);
     }
-    if (crossings.length !== 2) continue;
-    const a = node(crossings[0]), b = node(crossings[1]);
-    if (a === b) continue;
-    nodes[a].links.add(b);
-    nodes[b].links.add(a);
   }
   const loops = [];
   let open = 0;

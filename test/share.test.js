@@ -23,11 +23,15 @@ test("Share uploads only on click, copies once ready, and preserves links across
   const drive = {
     clientId: "client", apiKey: "key", prepare: async () => {},
     connect: async () => { connects++; },
-    share: async () => { uploads++; return { id: "cad123", folderId: "folder1" }; },
+    share: async (file, report, hash) => {
+      assert.equal(hash, "a".repeat(64));
+      uploads++;
+      return { id: "cad123", folderId: "folder1" };
+    },
   };
   try {
     const sharing = setupSharing(drive);
-    sharing.setFile(new File(["cad"], "test.step"));
+    sharing.setFile(new File(["cad"], "test.step"), "", "a".repeat(64));
     assert.equal(uploads, 0);
     const button = nodes.get("#share");
     await button.handlers.click();

@@ -18,6 +18,7 @@ let currentFile;
 const fileInput = document.querySelector("#file-input");
 const empty = document.querySelector("#empty");
 const loading = document.querySelector("#loading");
+const loadingText = document.querySelector("#loading-text");
 const fileName = document.querySelector("#file-name");
 const status = document.querySelector("#status");
 const statusDot = document.querySelector("#status-dot");
@@ -83,7 +84,10 @@ let partObjects = [];
 let treeEntries = [];
 let branchEntries = [];
 let loadedMeshes = [];
-let cad;
+let nodeIndices = new WeakMap();
+let partEntries = new Map();
+let selectedPart = -1;
+let cad = new CadClient();
 let frame = 0;
 function redraw() {
   if (frame) return;
@@ -100,7 +104,7 @@ const selection = setupSelection({
   getPlanes: () => section.planes, blocked: () => section.editing,
   measure: (refs) => cad.request("measure", { refs }),
   setVisible: setPartsVisible,
-  onSelect: (index) => treeEntries.forEach((entry) => entry.row.classList.toggle("selected", entry.indices.includes(index))),
+  onSelect: selectTreePart,
 });
 const section = setupSection({
   scene, camera, canvas: renderer.domElement, controls, getParts: () => partObjects, redraw,
@@ -112,12 +116,15 @@ const section = setupSection({
 });
 
 function dispose(group) {
+  const geometries = new Set();
+  const materials = new Set();
   group.traverse((item) => {
     if (!item.geometry) return;
-    item.geometry.dispose();
-    const materials = Array.isArray(item.material) ? item.material : [item.material];
-    materials.forEach((material) => material?.dispose());
+    geometries.add(item.geometry);
+    for (const material of Array.isArray(item.material) ? item.material : [item.material]) if (material) materials.add(material);
   });
+  for (const geometry of geometries) geometry.dispose();
+  for (const material of materials) material.dispose();
   group.clear();
 }
 
@@ -140,25 +147,38 @@ function fitModel() {
 }
 
 function collectMeshIndices(node) {
+  if (nodeIndices.has(node)) return nodeIndices.get(node);
   const indices = [...(node.meshes || [])];
   for (const child of node.children || []) indices.push(...collectMeshIndices(child));
-  return [...new Set(indices)];
+  const unique = [...new Set(indices)];
+  nodeIndices.set(node, unique);
+  return unique;
 }
 
-function updateTreeStates() {
-  for (const entry of treeEntries) {
-    const shown = entry.indices.filter((index) => partObjects[index]?.surface.visible).length;
-    entry.button.classList.toggle("off", shown === 0);
-    entry.button.classList.toggle("mixed", shown > 0 && shown < entry.indices.length);
-    entry.button.setAttribute("aria-pressed", shown > 0 && shown < entry.indices.length ? "mixed" : String(shown > 0));
-    const action = shown === entry.indices.length ? "Hide" : "Show";
-    entry.button.title = `${action} ${entry.name}`;
-    entry.button.setAttribute("aria-label", entry.button.title);
-  }
+function selectTreePart(index) {
+  for (const entry of partEntries.get(selectedPart) || []) entry.row.classList.remove("selected");
+  selectedPart = index;
+  for (const entry of partEntries.get(index) || []) entry.row.classList.add("selected");
 }
 
-const visibility = visibilityHistory(() => partObjects, () => {
-  updateTreeStates();
+function updateTreeStates(changes) {
+  const entries = changes ? new Set(changes.flatMap(({ index }) => partEntries.get(index) || [])) : treeEntries;
+  for (const entry of entries) updateTreeEntry(entry);
+}
+
+function updateTreeEntry(entry) {
+  let shown = 0;
+  for (const index of entry.indices) if (partObjects[index]?.surface.visible) shown++;
+  const mixed = shown > 0 && shown < entry.indices.length;
+  entry.button.classList.toggle("off", shown === 0);
+  entry.button.classList.toggle("mixed", mixed);
+  entry.button.setAttribute("aria-pressed", mixed ? "mixed" : String(shown > 0));
+  entry.button.title = `${shown === entry.indices.length ? "Hide" : "Show"} ${entry.name}`;
+  entry.button.setAttribute("aria-label", entry.button.title);
+}
+
+const visibility = visibilityHistory(() => partObjects, (changes) => {
+  updateTreeStates(changes);
   selection.visibilityChanged();
   redraw();
 });
@@ -230,18 +250,31 @@ function makeTreeRow(node, depth, fallbackName) {
     row.appendChild(total);
   }
 
-  treeEntries.push({ button: visibility, indices, name, row });
+  const entry = { button: visibility, indices, name, row };
+  treeEntries.push(entry);
+  for (const index of indices) {
+    if (!partEntries.has(index)) partEntries.set(index, []);
+    partEntries.get(index).push(entry);
+  }
+  row.classList.toggle("selected", indices.includes(selectedPart));
+  updateTreeEntry(entry);
 
   if (children.length) {
     const childList = document.createElement("div");
     childList.className = "component-children";
-    children.forEach((child, index) => childList.appendChild(makeTreeRow(child, depth + 1, `Component ${index + 1}`)));
+    let mounted = false;
+    const mount = () => {
+      if (mounted) return;
+      mounted = true;
+      childList.replaceChildren(...children.map((child, index) => makeTreeRow(child, depth + 1, `Component ${index + 1}`)));
+    };
     const startsCollapsed = depth >= 1;
     childList.hidden = startsCollapsed;
     item.appendChild(childList);
     branch.textContent = startsCollapsed ? "›" : "⌄";
     branch.setAttribute("aria-label", startsCollapsed ? "Expand component" : "Collapse component");
     const toggleBranch = () => {
+      mount();
       const collapsed = childList.toggleAttribute("hidden");
       branch.textContent = collapsed ? "›" : "⌄";
       branch.setAttribute("aria-label", collapsed ? "Expand component" : "Collapse component");
@@ -249,7 +282,8 @@ function makeTreeRow(node, depth, fallbackName) {
     branch.addEventListener("click", toggleBranch);
     label.classList.add("expandable");
     label.addEventListener("click", toggleBranch);
-    branchEntries.push({ branch, childList });
+    branchEntries.push({ branch, childList, mount });
+    if (!startsCollapsed) mount();
   }
   return item;
 }
@@ -258,6 +292,9 @@ function buildComponentTree(root, meshes) {
   componentTree.replaceChildren();
   treeEntries = [];
   branchEntries = [];
+  nodeIndices = new WeakMap();
+  partEntries = new Map();
+  selectedPart = -1;
   loadedMeshes = meshes;
   const referenced = new Set(collectMeshIndices(root));
   const roots = root.name?.trim() || root.meshes?.length ? [root] : (root.children || []);
@@ -279,6 +316,15 @@ function buildComponentTree(root, meshes) {
 }
 
 let busy = false;
+const stages = {
+  initialize: "Starting CAD reader…", hash: "Checking file…", cache: "Reusing CAD geometry…",
+  read: "Reading STEP data…", transfer: "Building CAD geometry…", mesh: "Meshing surfaces…",
+  extract: "Preparing faces and edges…", output: "Preparing geometry…", repair: "Checking surfaces…",
+  pack: "Preparing display…",
+};
+function reportProgress(stage) {
+  loadingText.textContent = stages[stage];
+}
 function setBusy(value) {
   busy = value;
   loading.hidden = !value;
@@ -297,23 +343,31 @@ async function openFile(file, sharedUrl = "") {
     return;
   }
 
-  status.textContent = "Reading geometry…";
+  for (const entry of performance.getEntriesByType("mark")) if (entry.name.startsWith("cad-")) performance.clearMarks(entry.name);
+  for (const entry of performance.getEntriesByType("measure")) if (entry.name.startsWith("cad-")) performance.clearMeasures(entry.name);
+  performance.mark("cad-load-start");
+  status.textContent = "Opening CAD…";
+  reportProgress("initialize");
   empty.hidden = true;
   setBusy(true);
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-  let nextCad;
+  let preparedId;
+  let committed = false;
   try {
-    nextCad = new CadClient();
-    const result = await nextCad.request("open", { buffer: await file.arrayBuffer() });
+    if (cad.error) cad = new CadClient();
+    const result = await cad.request("open", { buffer: await file.arrayBuffer() }, reportProgress);
+    preparedId = result.exactModelId;
+    performance.mark("cad-import-end");
+    loadingText.textContent = "Building view…";
+    await new Promise(requestAnimationFrame);
     const next = buildParts(result, file.name);
+    await cad.request("commit", { modelId: preparedId });
+    committed = true;
 
     selection.reset();
     section.reset();
     visibility.clear();
-    cad?.close();
-    cad = nextCad;
-    nextCad = null;
     dispose(surfaces);
     dispose(outlines);
     let triangles = 0;
@@ -340,10 +394,18 @@ async function openFile(file, sharedUrl = "") {
     stats.innerHTML = `${size}<span></span>${Math.round(triangles).toLocaleString()} triangles`;
     stats.hidden = false;
     currentFile = file;
-    sharing.setFile(file, sharedUrl);
+    sharing.setFile(file, sharedUrl, result.hash);
     if (!sharedUrl && window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
+    await new Promise(requestAnimationFrame);
+    performance.mark("cad-load-end");
+    performance.measure("cad-import", "cad-load-start", "cad-import-end");
+    performance.measure("cad-display", "cad-import-end", "cad-load-end");
+    performance.measure("cad-load", "cad-load-start", "cad-load-end");
+    for (const [stage, duration] of Object.entries(result.timings || {})) {
+      if (Number.isFinite(duration)) performance.measure(`cad-${stage}`, { start: 0, duration });
+    }
   } catch (error) {
-    nextCad?.close();
+    if (preparedId && !committed && !cad.error) await cad.request("discard", { modelId: preparedId });
     console.error(error);
     status.textContent = error instanceof Error ? error.message : "Could not read this file";
     if (!surfaces.children.length) empty.hidden = false;
@@ -376,11 +438,12 @@ edgesButton.addEventListener("click", () => {
 showAllButton.addEventListener("click", () => setPartsVisible(partObjects.map((_, index) => index), true));
 hideAllButton.addEventListener("click", () => setPartsVisible(partObjects.map((_, index) => index), false));
 expandTreeButton.addEventListener("click", () => {
-  branchEntries.forEach(({ branch, childList }) => {
+  for (const { branch, childList, mount } of branchEntries) {
+    mount();
     childList.hidden = false;
     branch.textContent = "⌄";
     branch.setAttribute("aria-label", "Collapse component");
-  });
+  }
 });
 collapseTreeButton.addEventListener("click", () => {
   branchEntries.forEach(({ branch, childList }) => {
@@ -439,17 +502,15 @@ async function loadShared() {
     empty.hidden = true;
     setBusy(true);
     status.textContent = "Downloading shared CAD…";
-    document.querySelector("#loading-text").textContent = "Downloading shared CAD…";
+    loadingText.textContent = "Downloading shared CAD…";
     const file = await drive.download(shared);
     setBusy(false);
-    document.querySelector("#loading-text").textContent = "Reading CAD geometry…";
     await openFile(file, shareUrl(window.location.href, shared));
   } catch (error) {
     status.textContent = error.message || "Could not load the shared file.";
     empty.hidden = Boolean(surfaces.children.length);
   } finally {
     setBusy(false);
-    document.querySelector("#loading-text").textContent = "Reading CAD geometry…";
   }
 }
 loadShared();

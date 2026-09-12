@@ -1,6 +1,7 @@
 import * as THREE from "three";
-import { axisPosition, cutBounds, pickSurfaces, worldPlane } from "./section-math.js";
+import { axisPosition, pickSurfaces, worldPlane } from "./section-math.js";
 import { sectionShape } from "./section-shape.js";
+import { faceGeometry } from "./model.js";
 
 export function capMaterial(part) {
   let index = 0;
@@ -12,6 +13,7 @@ export function capMaterial(part) {
   const material = part.surface.material[index].clone();
   material.clippingPlanes = null;
   material.side = THREE.DoubleSide;
+  material.flatShading = true;
   material.polygonOffset = true;
   material.polygonOffsetFactor = 1;
   material.polygonOffsetUnits = 1;
@@ -42,6 +44,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   let hoverKey = "";
   let down;
   let drag;
+  let dragFrame = 0;
 
   const hover = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({
     color: 0x176ff2, opacity: 0.4, transparent: true, depthWrite: false,
@@ -69,7 +72,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   cap.visible = false;
   scene.add(cap, overlay, arrow, hover);
 
-  function sync(writeOffset = true) {
+  function sync(writeOffset = true, rebuild = true) {
     plane.setFromNormalAndCoplanarPoint(normal.clone().multiplyScalar(flipped ? 1 : -1), origin.clone().addScaledVector(normal, offset));
     for (const item of [cap, overlay, arrow]) item.position.copy(origin).addScaledVector(normal, offset);
     cap.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
@@ -78,19 +81,26 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
     overlay.scale.setScalar(size);
     cap.updateMatrix();
     const worldToPlane = cap.matrix.clone().invert();
+    const center = new THREE.Vector3();
+    const transform = new THREE.Matrix4();
     for (const cut of cuts) {
-      const bounds = cutBounds(cut.bounds, plane, worldToPlane);
-      cut.crosses = Boolean(bounds);
-      const removed = !bounds && plane.distanceToPoint(cut.bounds.getCenter(new THREE.Vector3())) < 0;
+      cut.crosses = cut.bounds.intersectsPlane(plane);
+      const removed = !cut.crosses && plane.distanceToPoint(cut.bounds.getCenter(center)) < 0;
       // Preserve the user's visibility flags; layer 1 is excluded from rendering and picking.
       cut.part.surface.layers.set(removed ? 1 : 0);
       cut.part.edge.layers.set(removed ? 1 : 0);
-      if (!bounds) continue;
-      const shape = sectionShape(cut.part.surface.geometry, worldToPlane.clone().multiply(cut.part.surface.matrixWorld));
+      if (!cut.crosses || !rebuild) continue;
+      if (!cut.fill) {
+        cut.fill = new THREE.Mesh(new THREE.BufferGeometry(), capMaterial(cut.part));
+        cut.fill.userData.part = cut.part;
+        cut.outline = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x22272e, depthWrite: false }));
+        cut.outline.renderOrder = 1;
+        cap.add(cut.fill, cut.outline);
+      }
+      const shape = sectionShape(cut.part.surface.geometry, transform.copy(worldToPlane).multiply(cut.part.surface.matrixWorld));
       cut.fill.geometry.dispose();
       cut.fill.geometry = new THREE.BufferGeometry();
       cut.fill.geometry.setAttribute("position", new THREE.BufferAttribute(shape.fill, 3));
-      cut.fill.geometry.computeVertexNormals();
       cut.outline.geometry.dispose();
       cut.outline.geometry = new THREE.BufferGeometry();
       cut.outline.geometry.setAttribute("position", new THREE.BufferAttribute(shape.edges, 3));
@@ -102,6 +112,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   function hideHover() { hover.visible = false; hoverKey = ""; version++; redraw(); }
   function stopDrag() {
     if (!drag) return;
+    if (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; if (active) sync(); }
     if (canvas.hasPointerCapture(drag.id)) canvas.releasePointerCapture(drag.id);
     drag = null;
     controls.enabled = true;
@@ -150,10 +161,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
   }
   function paintFace(picked) {
     hover.geometry.dispose();
-    hover.geometry = new THREE.BufferGeometry();
-    hover.geometry.setAttribute("position", picked.part.surface.geometry.getAttribute("position").clone());
-    const face = picked.part.data.faces.find((face) => face.id === picked.id);
-    hover.geometry.setIndex(new THREE.BufferAttribute(picked.part.surface.geometry.index.array.slice(face.firstIndex, face.firstIndex + face.indexCount), 1));
+    hover.geometry = faceGeometry(picked.part.surface.geometry, picked.part.faces.get(picked.id));
     hover.matrix.copy(picked.part.surface.matrix);
     hover.matrixAutoUpdate = false;
     hover.visible = true;
@@ -201,7 +209,10 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
       event.stopImmediatePropagation();
       setRay(event);
       const position = axisPosition(ray.ray, origin, normal);
-      if (position !== null) { offset = drag.offset + position - drag.position; sync(); }
+      if (position !== null) {
+        offset = drag.offset + position - drag.position;
+        if (!dragFrame) dragFrame = requestAnimationFrame(() => { dragFrame = 0; sync(); });
+      }
       return;
     }
     if (!picking || choosing || event.buttons) return;
@@ -234,7 +245,7 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
     offset = offsetInput.valueAsNumber;
     sync(false);
   });
-  document.querySelector("#section-flip").addEventListener("click", () => { flipped = !flipped; sync(); });
+  document.querySelector("#section-flip").addEventListener("click", () => { flipped = !flipped; sync(true, false); });
   document.querySelector("#section-pick").addEventListener("click", () => { picking = true; arrow.visible = overlay.visible = false; hint.textContent = "Click a planar face"; hideHover(); });
   document.querySelector("#section-done").addEventListener("click", () => edit(false));
   document.querySelector("#section-clear").addEventListener("click", clear);
@@ -254,21 +265,17 @@ export function setupSection({ scene, camera, canvas, controls, getParts, queryP
     setParts() {
       const box = new THREE.Box3();
       for (const part of getParts()) {
-        const bounds = new THREE.Box3().setFromObject(part.surface, true);
+        const bounds = part.bounds;
         box.union(bounds);
         for (const material of [...part.surface.material, part.edge.material]) material.clippingPlanes = planes;
-        const fill = new THREE.Mesh(new THREE.BufferGeometry(), capMaterial(part));
-        fill.userData.part = part;
-        const outline = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x22272e, depthWrite: false }));
-        outline.renderOrder = 1;
-        cap.add(fill, outline);
-        cuts.push({ part, bounds, fill, outline, crosses: false });
+        cuts.push({ part, bounds, crosses: false });
       }
       size = Math.max(box.getSize(new THREE.Vector3()).length(), 1);
     },
     update() {
       if (!active) return;
       for (const cut of cuts) {
+        if (!cut.fill) continue;
         const visible = cut.crosses && cut.part.surface.visible;
         cut.fill.visible = visible;
         cut.outline.visible = visible && cut.part.edge.visible && cut.part.edge.parent?.visible !== false;

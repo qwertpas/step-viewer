@@ -47,6 +47,7 @@ export class Drive {
     this.fetch = (...args) => request(...args);
     this.token = "";
     this.expires = 0;
+    this.hashes = new WeakMap();
   }
 
   prepare() {
@@ -122,12 +123,21 @@ export class Drive {
     return (await response.json()).id;
   }
 
-  async share(file, report) {
+  hash(file) {
+    if (!this.hashes.has(file)) {
+      const hash = file.arrayBuffer().then((bytes) => crypto.subtle.digest("SHA-256", bytes))
+        .then((digest) => Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""));
+      this.hashes.set(file, hash);
+      hash.catch(() => this.hashes.delete(file));
+    }
+    return this.hashes.get(file);
+  }
+
+  async share(file, report, fileHash) {
     if (!file.size || file.size > shareLimit) throw new Error("Sharing supports STEP files up to 250 MB.");
     report("Preparing share…");
-    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    const folder = await this.folder();
+    if (fileHash) this.hashes.set(file, Promise.resolve(fileHash));
+    const [hash, folder] = await Promise.all([this.hash(file), this.folder()]);
     let saved = await this.find(`'${folder}' in parents and appProperties has { key='sha256' and value='${hash}' }`);
     if (!saved) {
       report("Uploading to Google Drive…");

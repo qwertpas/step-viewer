@@ -7,6 +7,8 @@ export function nameNodes(nodes, geometries, filename = "Model") {
   function siblings(items, parentPath = [], depth = 0) {
     const names = items.map((node) => useful(node.name)
       || (node.meshes.length === 1 ? useful(geometries[node.meshes[0]].name) : ""));
+    const totals = new Map();
+    for (const name of names) totals.set(name, (totals.get(name) || 0) + 1);
     let unnamed = 0;
     const counts = new Map();
     return items.map((node, index) => {
@@ -15,7 +17,7 @@ export function nameNodes(nodes, geometries, filename = "Model") {
       if (original) {
         const count = (counts.get(original) || 0) + 1;
         counts.set(original, count);
-        if (names.filter((name) => name === original).length > 1) label += `_${count}`;
+        if (totals.get(original) > 1) label += `_${count}`;
       }
       const path = original
         ? [...(depth === 1 ? [] : parentPath), token(label)]

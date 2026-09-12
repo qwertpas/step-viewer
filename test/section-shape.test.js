@@ -54,3 +54,17 @@ test("tiny independently tessellated face seams join without changing the cut", 
   assert.equal(shape.loops, 1);
   assert.ok(Math.abs(area(shape) - 4) < 1e-5);
 });
+
+test("accelerated sections preserve rotated, reflected and nonuniformly scaled cuts", () => {
+  const geometry = new THREE.BoxGeometry(2, 2, 2, 12, 12, 12);
+  const index = geometry.index.array.slice();
+  const transform = new THREE.Matrix4().makeRotationX(0.4).scale(new THREE.Vector3(-2, 1, 3));
+  const shape = sectionShape(geometry, transform);
+  assert.equal(shape.open, 0);
+  assert.equal(shape.loops, 1);
+  assert.ok(Math.abs(area(shape) - 8 / Math.cos(0.4)) < 1e-5);
+  assert.deepEqual(geometry.index.array, index);
+  const tree = geometry.boundsTree;
+  assert.equal(sectionShape(geometry, transform).loops, 1);
+  assert.equal(geometry.boundsTree, tree);
+});

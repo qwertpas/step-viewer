@@ -7,6 +7,7 @@ export function setupSharing(drive) {
   const link = document.querySelector("#share-link");
   const driveLink = document.querySelector("#share-drive");
   let file = null;
+  let hash;
   let url = "";
   let loading = false;
   let busy = false;
@@ -30,7 +31,7 @@ export function setupSharing(drive) {
       if (!url) {
         report("Connecting to Google Drive…");
         await drive.connect();
-        const shared = await drive.share(file, report);
+        const shared = await drive.share(file, report, hash);
         url = shareUrl(window.location.href, shared);
         driveLink.href = `https://drive.google.com/drive/folders/${encodeURIComponent(shared.folderId)}`;
         driveLink.hidden = false;
@@ -58,8 +59,9 @@ export function setupSharing(drive) {
   return {
     get busy() { return busy; },
     setLoading(value) { loading = value; update(); },
-    setFile(value, sharedUrl = "") {
+    setFile(value, sharedUrl = "", fileHash) {
       file = value;
+      hash = fileHash;
       url = sharedUrl;
       driveLink.hidden = true;
       driveLink.href = "";

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { kept, pickSurfaces } from "./section-math.js";
+import { faceGeometry } from "./model.js";
 
 export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blocked, measure, setVisible, onSelect, redraw }) {
   const button = document.querySelector("#measure");
@@ -25,7 +26,7 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
 
   function clearGroup(group) {
     for (const item of group.children) {
-      item.geometry.dispose();
+      if (!item.userData.sharedGeometry) item.geometry.dispose();
       item.material.dispose();
     }
     group.clear();
@@ -41,23 +42,22 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
   function overlay(ref, group, color) {
     const part = getParts()[ref.part];
     if (!part?.surface.visible) return;
-    const geometry = new THREE.BufferGeometry();
     let object;
     if (ref.kind === "edge") {
       const edge = part.data.edges.find((edge) => edge.id === ref.id);
+      const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.Float32BufferAttribute(edge.points, 3));
       object = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, depthTest: false }));
     } else {
-      geometry.setAttribute("position", part.surface.geometry.getAttribute("position").clone());
-      const face = ref.kind === "face" && part.data.faces.find((face) => face.id === ref.id);
-      const indices = part.surface.geometry.index.array;
-      geometry.setIndex(new THREE.BufferAttribute(face ? indices.slice(face.firstIndex, face.firstIndex + face.indexCount) : indices, 1));
+      const geometry = ref.kind === "face" ? faceGeometry(part.surface.geometry, part.faces.get(ref.id)) : part.surface.geometry;
       object = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
         color, transparent: true, opacity: ref.kind === "part" ? 0.2 : 0.4,
         depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2,
       }));
+      object.userData.sharedGeometry = ref.kind === "part";
     }
     object.applyMatrix4(new THREE.Matrix4().fromArray(part.transform));
+    object.matrixAutoUpdate = false;
     object.material.clippingPlanes = getPlanes();
     object.renderOrder = 2;
     group.add(object);
@@ -164,12 +164,11 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
     const rect = canvas.getBoundingClientRect();
     pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
     ray.setFromCamera(pointer, camera);
-    const visible = parts.filter((part) => part.surface.visible);
     const { hit, limit } = pickSurfaces(ray, parts, getPlanes());
     if (!measuring) return hit ? { part: hit.object.userData.partIndex, kind: "part" } : null;
     const distance = hit?.distance || camera.position.distanceTo(new THREE.Box3().setFromObject(highlights).getCenter(new THREE.Vector3()));
     ray.params.Line.threshold = Math.max(distance, 1) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / rect.height * 6;
-    const candidates = hit ? [parts[hit.object.userData.partIndex].edge] : visible.map((part) => part.edge);
+    const candidates = hit ? [parts[hit.object.userData.partIndex].edge] : parts.filter((part) => part.surface.visible).map((part) => part.edge);
     const edgeHits = ray.intersectObjects(candidates, false);
     const edgeHit = edgeHits.find((edge) => kept(edge.point, getPlanes()) && edge.distance <= limit + ray.params.Line.threshold && (!hit || edge.distance <= hit.distance + ray.params.Line.threshold * 2));
     if (edgeHit) {
