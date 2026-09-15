@@ -54,7 +54,7 @@ host.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.08;
+controls.dampingFactor = 0.2;
 controls.screenSpacePanning = true;
 controls.target.set(0, 0, 25);
 
@@ -86,7 +86,7 @@ let branchEntries = [];
 let loadedMeshes = [];
 let nodeIndices = new WeakMap();
 let partEntries = new Map();
-let selectedPart = -1;
+let selectedParts = new Set();
 let cad = new CadClient();
 let frame = 0;
 function redraw() {
@@ -104,7 +104,7 @@ const selection = setupSelection({
   getPlanes: () => section.planes, blocked: () => section.editing,
   measure: (refs) => cad.request("measure", { refs }),
   setVisible: setPartsVisible,
-  onSelect: selectTreePart,
+  onSelect: selectTreeParts,
 });
 const section = setupSection({
   scene, camera, canvas: renderer.domElement, controls, getParts: () => partObjects, redraw,
@@ -155,10 +155,16 @@ function collectMeshIndices(node) {
   return unique;
 }
 
-function selectTreePart(index) {
-  for (const entry of partEntries.get(selectedPart) || []) entry.row.classList.remove("selected");
-  selectedPart = index;
-  for (const entry of partEntries.get(index) || []) entry.row.classList.add("selected");
+function updateTreeSelection(entry) {
+  const selected = entry.indices.some((index) => selectedParts.has(index));
+  entry.row.classList.toggle("selected", selected);
+  entry.label.setAttribute("aria-pressed", String(selected));
+}
+
+function selectTreeParts(indices) {
+  const changed = new Set([...selectedParts, ...indices].flatMap((index) => partEntries.get(index) || []));
+  selectedParts = new Set(indices);
+  for (const entry of changed) updateTreeSelection(entry);
 }
 
 function updateTreeStates(changes) {
@@ -237,10 +243,16 @@ function makeTreeRow(node, depth, fallbackName) {
   icon.className = children.length ? "assembly-icon" : "part-icon";
   row.appendChild(icon);
 
-  const label = document.createElement("span");
+  const label = document.createElement("button");
+  label.type = "button";
   label.className = "component-name";
   label.textContent = name;
-  label.title = name;
+  label.title = `Select ${name}`;
+  const select = () => selection.selectParts(indices, name);
+  label.addEventListener("click", select);
+  row.addEventListener("click", (event) => {
+    if (!event.target.closest("button")) select();
+  });
   row.appendChild(label);
 
   if (indices.length > 1) {
@@ -273,13 +285,13 @@ function makeTreeRow(node, depth, fallbackName) {
   });
   row.appendChild(download);
 
-  const entry = { button: visibility, download, indices, name, row };
+  const entry = { button: visibility, download, label, indices, name, row };
   treeEntries.push(entry);
   for (const index of indices) {
     if (!partEntries.has(index)) partEntries.set(index, []);
     partEntries.get(index).push(entry);
   }
-  row.classList.toggle("selected", indices.includes(selectedPart));
+  updateTreeSelection(entry);
   updateTreeEntry(entry);
 
   if (children.length) {
@@ -303,8 +315,6 @@ function makeTreeRow(node, depth, fallbackName) {
       branch.setAttribute("aria-label", collapsed ? "Expand component" : "Collapse component");
     };
     branch.addEventListener("click", toggleBranch);
-    label.classList.add("expandable");
-    label.addEventListener("click", toggleBranch);
     branchEntries.push({ branch, childList, mount });
     if (!startsCollapsed) mount();
   }
@@ -317,7 +327,7 @@ function buildComponentTree(root, meshes) {
   branchEntries = [];
   nodeIndices = new WeakMap();
   partEntries = new Map();
-  selectedPart = -1;
+  selectedParts = new Set();
   loadedMeshes = meshes;
   const referenced = new Set(collectMeshIndices(root));
   const roots = root.name?.trim() || root.meshes?.length ? [root] : (root.children || []);

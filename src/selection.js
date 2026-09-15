@@ -16,7 +16,8 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
   const ray = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   let mode = false;
-  let selectedPart = null;
+  let selectedParts = [];
+  let selectionName = "";
   let refs = [];
   let version = 0;
   let anchor = null;
@@ -65,9 +66,9 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
 
   function paint() {
     clearGroup(highlights);
-    if (selectedPart !== null) overlay({ part: selectedPart, kind: "part" }, highlights, 0x176ff2);
+    for (const part of selectedParts) overlay({ part, kind: "part" }, highlights, 0x176ff2);
     refs.forEach((ref, index) => overlay(ref, highlights, index ? 0xf59e0b : 0x176ff2));
-    onSelect(selectedPart);
+    onSelect(selectedParts);
   }
 
   function line(a, b, text) {
@@ -90,6 +91,7 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
     const request = ++version;
     clearDimension();
     panel.hidden = false;
+    result.hidden = false;
     heading.textContent = "Measure · exact CAD";
     hint.textContent = "Click a face or edge · Shift-click a second · Esc clears";
     if (!refs.length) {
@@ -130,19 +132,24 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
     }
   }
 
-  function showPart() {
-    const part = getParts()[selectedPart];
-    panel.hidden = !part;
-    if (!part) return;
-    heading.textContent = part.name || `Part ${selectedPart + 1}`;
-    result.textContent = part.surface.visible ? "Selected" : "Hidden · still selected";
+  function showParts() {
+    panel.hidden = !selectedParts.length;
+    if (!selectedParts.length) return;
+    const parts = selectedParts.map((index) => getParts()[index]);
+    const hidden = parts.filter((part) => !part.surface.visible).length;
+    heading.textContent = selectionName || parts[0].name;
+    result.textContent = parts.length === 1
+      ? (hidden ? "Hidden" : "")
+      : `${parts.length} parts${hidden ? ` · ${hidden} hidden` : ""}`;
+    result.hidden = !result.textContent;
     hint.textContent = "V toggles visibility · M measures · Esc clears";
   }
 
   function clear() {
     version++;
     refs = [];
-    selectedPart = null;
+    selectedParts = [];
+    selectionName = "";
     clearDimension();
     clearGroup(hover);
     hovered = "";
@@ -198,8 +205,9 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
       else refs = [...refs.slice(-1), picked];
       updateMeasurement();
     } else {
-      selectedPart = picked.part;
-      showPart();
+      selectedParts = [picked.part];
+      selectionName = "";
+      showParts();
     }
     paint();
   });
@@ -226,15 +234,23 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
     if (event.key === "Escape") clear();
     if (button.disabled) return;
     if (event.key.toLowerCase() === "m") setMode(!mode);
-    if (event.key.toLowerCase() === "v" && selectedPart !== null) {
+    if (event.key.toLowerCase() === "v" && selectedParts.length) {
       event.preventDefault();
-      const part = getParts()[selectedPart];
-      setVisible([selectedPart], !part.surface.visible);
+      const allVisible = selectedParts.every((index) => getParts()[index].surface.visible);
+      setVisible(selectedParts, !allVisible);
     }
   });
 
   return {
     reset: () => setMode(false),
+    selectParts(indices, name) {
+      if (blocked() || button.disabled) return;
+      setMode(false);
+      selectedParts = [...new Set(indices)].filter((index) => getParts()[index]);
+      selectionName = name;
+      paint();
+      showParts();
+    },
     visibilityChanged() {
       clearGroup(hover);
       hovered = "";
@@ -243,7 +259,7 @@ export function setupSelection({ scene, camera, canvas, getParts, getPlanes, blo
         updateMeasurement();
       }
       paint();
-      if (!mode) showPart();
+      if (!mode) showParts();
     },
     update() {
       if (!anchor) return;

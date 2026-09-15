@@ -107,8 +107,8 @@ button { color: inherit; font: inherit; }
 .visibility-button.mixed span::after { width: 7px; height: 2px; border-radius: 2px; background: #868c92; }
 .part-icon, .assembly-icon { position: relative; flex: 0 0 auto; width: 13px; height: 13px; margin: 0 7px 0 3px; border: 1px solid #899097; border-radius: 2px; background: linear-gradient(135deg, #f7f8f9 48%, #cfd3d7 50%); transform: rotate(45deg) scale(.72); }
 .assembly-icon { box-shadow: 4px -4px 0 -1px #eef0f2, 4px -4px 0 0 #899097; }
-.component-name { min-width: 0; overflow: hidden; flex: 1; color: #3f454b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.component-name.expandable { cursor: pointer; }
+.component-name { padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; min-width: 0; overflow: hidden; flex: 1; color: #3f454b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.component-name:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
 .part-total { display: grid; min-width: 17px; height: 17px; margin-left: 5px; place-items: center; border-radius: 9px; color: #747a81; background: rgba(30,36,42,.07); font-size: 8px; }
 .components.collapsed { width: 150px; }
 .components.collapsed .component-tree, .components.collapsed .tree-toolbar, .components.collapsed .components-header > div:first-child span, .components.collapsed .component-actions button:not(.collapse-components) { display: none; }
