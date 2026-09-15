@@ -249,6 +249,16 @@ export interface OcctJSImportTimings {
     totalMs: number;
 }
 
+/** Tree to export. Body transforms are absolute, column-major, in millimeters. */
+export interface OcctJSExportNode {
+    name: string;
+    handle?: number;
+    transform?: OcctJSMatrix4;
+    color?: OcctJSColor | null;
+    faces?: { id: number; color?: OcctJSColor | null }[];
+    children: OcctJSExportNode[];
+}
+
 export interface OcctJSExactOpenResult extends OcctJSResult {
     timings?: OcctJSImportTimings;
     exactModelId?: number;
@@ -1166,6 +1176,7 @@ export interface OcctJSModule {
     OpenExactHelicalSweep(spec: OcctJSHelicalSweepSpec, options?: OcctJSHelicalSweepBuildOptions): OcctJSExactHelicalSweepOpenResult;
     OpenExactCompositeShape(spec: OcctJSCompositeShapeSpec, options?: OcctJSCompositeShapeBuildOptions): OcctJSExactCompositeShapeOpenResult;
     OpenExactModel(format: string, content: Uint8Array, params?: OcctJSReadParams): OcctJSExactOpenResult;
+    ExportExactStepModel(exactModelId: number, tree: OcctJSExportNode): { success: true; content: Uint8Array } | { success: false; error: string };
     OpenExactStepModel(content: Uint8Array, params?: OcctJSReadParams): OcctJSExactOpenResult;
     OpenExactIgesModel(content: Uint8Array, params?: OcctJSReadParams): OcctJSExactOpenResult;
     OpenExactBrepModel(content: Uint8Array, params?: OcctJSReadParams): OcctJSExactOpenResult;

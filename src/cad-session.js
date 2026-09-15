@@ -48,6 +48,11 @@ export class CadSession {
     const modelId = this.active.result.exactModelId;
     if (type === "measure") return measureCad(this.occt, modelId, data.refs);
     if (type === "plane") return facePlane(this.occt, modelId, data.ref);
+    if (type === "export") {
+      const result = this.occt.ExportExactStepModel(modelId, data.tree);
+      if (!result.success) throw new Error(result.error);
+      return result.content;
+    }
     throw new Error("Unknown CAD request");
   }
 }

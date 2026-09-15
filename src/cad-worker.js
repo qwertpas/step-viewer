@@ -39,7 +39,7 @@ export class CadWorker {
         if (type === "commit") cad.commit(data.modelId);
         else if (type === "discard") cad.discard(data.modelId);
         else result = cad.query(type, data);
-        this.send({ id, result });
+        this.send({ id, result }, type === "export" ? [result.buffer] : []);
       }
     } catch (error) {
       if (type === "open" && result && !result.cached) cad.discard(result.exactModelId);

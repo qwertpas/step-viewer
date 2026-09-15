@@ -7,7 +7,7 @@ import { setupSelection } from "./selection.js";
 import { setupSection } from "./section.js";
 import { Drive, readShare, shareUrl } from "./drive.js";
 import { setupSharing } from "./share.js";
-import { downloadFile } from "./download.js";
+import { downloadFile, componentTree as exportTree, componentFile } from "./download.js";
 import "./style.css";
 
 const app = document.querySelector("#app");
@@ -250,7 +250,30 @@ function makeTreeRow(node, depth, fallbackName) {
     row.appendChild(total);
   }
 
-  const entry = { button: visibility, indices, name, row };
+  const download = document.createElement("button");
+  download.className = "component-download";
+  download.title = `Download ${name} as STEP`;
+  download.setAttribute("aria-label", download.title);
+  download.disabled = busy || !indices.length;
+  download.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></svg>';
+  download.addEventListener("click", async () => {
+    if (busy || sharing.busy) return;
+    setBusy(true);
+    loadingText.textContent = `Preparing ${name}…`;
+    status.textContent = "Exporting STEP…";
+    try {
+      const bytes = await cad.request("export", { tree: exportTree({ ...node, name }, partObjects) });
+      downloadFile(componentFile(bytes, name));
+      status.textContent = `STEP ready: ${name}`;
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : "Could not export component";
+    } finally {
+      setBusy(false);
+    }
+  });
+  row.appendChild(download);
+
+  const entry = { button: visibility, download, indices, name, row };
   treeEntries.push(entry);
   for (const index of indices) {
     if (!partEntries.has(index)) partEntries.set(index, []);
@@ -330,6 +353,7 @@ function setBusy(value) {
   loading.hidden = !value;
   openButton.disabled = value;
   downloadButton.disabled = value || !currentFile;
+  for (const entry of treeEntries) entry.download.disabled = value || !entry.indices.length;
   sharing.setLoading(value);
   edgesButton.disabled = value || !surfaces.children.length;
   document.querySelector("#measure").disabled = value || !surfaces.children.length || section.editing;

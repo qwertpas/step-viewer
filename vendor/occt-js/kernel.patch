@@ -13,10 +13,10 @@ index 9443b11..3069ac1 100644
      target_compile_options(occt-js PUBLIC -fwasm-exceptions)
  
 diff --git a/dist/occt-js.d.ts b/dist/occt-js.d.ts
-index e825e7f..f70265c 100644
+index e825e7f..6575021 100644
 --- a/dist/occt-js.d.ts
 +++ b/dist/occt-js.d.ts
-@@ -240,7 +240,17 @@ export type OcctJSStepPartExportResult =
+@@ -240,7 +240,27 @@ export type OcctJSStepPartExportResult =
      | OcctJSStepPartExportSuccess
      | OcctJSStepPartExportFailure;
  
@@ -29,12 +29,30 @@ index e825e7f..f70265c 100644
 +    totalMs: number;
 +}
 +
++/** Tree to export. Body transforms are absolute, column-major, in millimeters. */
++export interface OcctJSExportNode {
++    name: string;
++    handle?: number;
++    transform?: OcctJSMatrix4;
++    color?: OcctJSColor | null;
++    faces?: { id: number; color?: OcctJSColor | null }[];
++    children: OcctJSExportNode[];
++}
++
  export interface OcctJSExactOpenResult extends OcctJSResult {
 +    timings?: OcctJSImportTimings;
      exactModelId?: number;
      exactGeometryBindings?: OcctJSExactGeometryBinding[];
  }
-@@ -1193,6 +1203,7 @@ export interface OcctJSModule {
+@@ -1156,6 +1176,7 @@ export interface OcctJSModule {
+     OpenExactHelicalSweep(spec: OcctJSHelicalSweepSpec, options?: OcctJSHelicalSweepBuildOptions): OcctJSExactHelicalSweepOpenResult;
+     OpenExactCompositeShape(spec: OcctJSCompositeShapeSpec, options?: OcctJSCompositeShapeBuildOptions): OcctJSExactCompositeShapeOpenResult;
+     OpenExactModel(format: string, content: Uint8Array, params?: OcctJSReadParams): OcctJSExactOpenResult;
++    ExportExactStepModel(exactModelId: number, tree: OcctJSExportNode): { success: true; content: Uint8Array } | { success: false; error: string };
+     OpenExactStepModel(content: Uint8Array, params?: OcctJSReadParams): OcctJSExactOpenResult;
+     OpenExactIgesModel(content: Uint8Array, params?: OcctJSReadParams): OcctJSExactOpenResult;
+     OpenExactBrepModel(content: Uint8Array, params?: OcctJSReadParams): OcctJSExactOpenResult;
+@@ -1193,6 +1214,7 @@ export interface OcctJSModule {
  declare function OcctJS(options?: {
      locateFile?: (filename: string, scriptDirectory?: string) => string;
      wasmBinary?: ArrayBuffer | Uint8Array;
@@ -549,18 +567,33 @@ index d609e66..2fbff81 100644
      std::string                error;
      std::vector<OcctNodeData>  nodes;
 diff --git a/src/js-interface.cpp b/src/js-interface.cpp
-index 272054b..27a8fff 100644
+index 272054b..10f0241 100644
 --- a/src/js-interface.cpp
 +++ b/src/js-interface.cpp
-@@ -9,6 +9,7 @@
+@@ -7,8 +7,22 @@
+ #include <algorithm>
+ #include <cctype>
  #include <cmath>
++#include <sstream>
++#include <functional>
++#include <Quantity_Color.hxx>
++#include <BRepBuilderAPI_Transform.hxx>
++#include <stdexcept>
++#include <STEPCAFControl_Writer.hxx>
++#include <TDocStd_Document.hxx>
++#include <TDataStd_Name.hxx>
++#include <XCAFDoc_DocumentTool.hxx>
++#include <XCAFDoc_ShapeTool.hxx>
++#include <XCAFDoc_ColorTool.hxx>
++#include <TopExp.hxx>
++#include <TopTools_IndexedMapOfShape.hxx>
  
  #include "importer-step.hpp"
 +#include "import-progress.hpp"
  #include "importer-iges.hpp"
  #include "importer-brep.hpp"
  #include "composite-shape.hpp"
-@@ -1822,6 +1823,7 @@ val ReadByFormat(const std::string& format, const val& content, const val& jsPar
+@@ -1822,6 +1836,7 @@ val ReadByFormat(const std::string& format, const val& content, const val& jsPar
  
  val OpenExactByFormat(const std::string& format, const val& content, const val& jsParams)
  {
@@ -568,7 +601,7 @@ index 272054b..27a8fff 100644
      std::vector<uint8_t> buffer = ExtractBytes(content);
      ImportParams params = ParseImportParams(jsParams);
  
-@@ -1870,9 +1872,19 @@ val OpenExactByFormat(const std::string& format, const val& content, const val&
+@@ -1870,9 +1885,19 @@ val OpenExactByFormat(const std::string& format, const val& content, const val&
          return BuildResult(imported.scene, normalizedFormat);
      }
  
@@ -588,6 +621,91 @@ index 272054b..27a8fff 100644
      return result;
  }
  
+@@ -2389,6 +2414,76 @@ val OpenExactCompositeShapeBinding(const val& jsSpec, const val& jsOptions)
+     return result;
+ }
+ 
++// Export the selected display tree from retained exact shapes, in millimeters.
++val ExportExactStepModel(int modelId, const val& tree)
++{
++    val result = val::object();
++    try {
++        Handle(TDocStd_Document) doc = new TDocStd_Document("BinXCAF");
++        XCAFDoc_DocumentTool::SetLengthUnit(doc, 0.001);
++        auto shapes = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
++        auto colors = XCAFDoc_DocumentTool::ColorTool(doc->Main());
++        auto setColor = [&](const TDF_Label& label, const val& color) {
++            if (!color.isNull() && !color.isUndefined()) {
++                colors->SetColor(label, Quantity_Color(color["r"].as<double>(),
++                    color["g"].as<double>(), color["b"].as<double>(), Quantity_TOC_RGB), XCAFDoc_ColorSurf);
++            }
++        };
++        std::function<TDF_Label(const val&)> add = [&](const val& node) {
++            TDF_Label label = shapes->NewShape();
++            if (!node["handle"].isUndefined()) {
++                TopoDS_Shape shape;
++                auto found = ExactModelStore::Instance().GetGeometryShape(modelId, node["handle"].as<int>(), shape);
++                if (!found.ok) throw std::runtime_error(found.message);
++                // Bake the placement into a distinct body so names and face colors remain independent.
++                auto matrix = ParseMatrix4(node["transform"]);
++                shape = BRepBuilderAPI_Transform(shape, MatrixToTrsf(matrix), true).Shape();
++                shapes->SetShape(label, shape);
++                setColor(label, node["color"]);
++                TopTools_IndexedMapOfShape faces;
++                TopExp::MapShapes(shape, TopAbs_FACE, faces);
++                const val faceColors = node["faces"];
++                if (!faceColors.isUndefined()) {
++                    for (unsigned i = 0; i < faceColors["length"].as<unsigned>(); ++i) {
++                        const val face = faceColors[i];
++                        const int id = face["id"].as<int>();
++                        if (id > 0 && id <= faces.Extent() && !face["color"].isNull() && !face["color"].isUndefined())
++                            setColor(shapes->AddSubShape(label, faces(id)), face["color"]);
++                    }
++                }
++            } else {
++                const val children = node["children"];
++                const unsigned count = children["length"].as<unsigned>();
++                if (!count) throw std::runtime_error("No components to export");
++                for (unsigned i = 0; i < count; ++i) {
++                    const val child = children[i];
++                    TDF_Label instance = shapes->AddComponent(label, add(child), TopLoc_Location());
++                    TDataStd_Name::Set(instance, TCollection_ExtendedString(child["name"].as<std::string>().c_str(), true));
++                }
++            }
++            TDataStd_Name::Set(label, TCollection_ExtendedString(node["name"].as<std::string>().c_str(), true));
++            return label;
++        };
++        add(tree);
++        shapes->UpdateAssemblies();
++        STEPCAFControl_Writer writer;
++        if (!writer.Transfer(doc, STEPControl_AsIs)) throw std::runtime_error("Could not prepare STEP export");
++        std::ostringstream stream;
++        if (writer.WriteStream(stream) != IFSelect_RetDone) throw std::runtime_error("Could not write STEP export");
++        const std::string text = stream.str();
++        const std::vector<uint8_t> bytes(text.begin(), text.end());
++        result.set("success", true);
++        result.set("content", BytesToUint8Array(bytes));
++    } catch (const Standard_Failure& error) {
++        result.set("success", false);
++        result.set("error", std::string(error.GetMessageString()));
++    } catch (const std::exception& error) {
++        result.set("success", false);
++        result.set("error", std::string(error.what()));
++    }
++    return result;
++}
++
+ val OpenExactStepModel(const val& content, const val& jsParams)
+ {
+     return OpenExactByFormat("step", content, jsParams);
+@@ -2929,6 +3024,7 @@ EMSCRIPTEN_BINDINGS(occtjs)
+     function("OpenExactCompositeShape", &OpenExactCompositeShapeBinding);
+     function("OpenExactModel", &OpenExactModel);
+     function("OpenExactStepModel", &OpenExactStepModel);
++    function("ExportExactStepModel", &ExportExactStepModel);
+     function("OpenExactIgesModel", &OpenExactIgesModel);
+     function("OpenExactBrepModel", &OpenExactBrepModel);
+     function("RetainExactModel", &RetainExactModel);
 diff --git a/test/import_performance_contract.test.mjs b/test/import_performance_contract.test.mjs
 new file mode 100644
 index 0000000..a830b78
