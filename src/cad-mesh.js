@@ -20,6 +20,10 @@ export function repairCone(occt, modelId, handle, geometry, face) {
   if (!center.ok) throw new Error(center.message);
   const axis = new THREE.Vector3(...center.localAxisDirection).normalize();
   const origin = new THREE.Vector3(...center.localCenter);
+  const coneNormal = (point) => {
+    const direction = point.clone().sub(origin);
+    return axis.clone().cross(direction).cross(direction).normalize();
+  };
   const rotation = new THREE.Quaternion().setFromUnitVectors(axis, new THREE.Vector3(0, 0, 1));
   const loops = faceLoops(geometry, face, true);
   const rings = loops.map((points) => ({ points, flat: points.map((point) => {
@@ -27,6 +31,21 @@ export function repairCone(occt, modelId, handle, geometry, face) {
     return new THREE.Vector2(local.x, local.y);
   }) }));
   rings.sort((a, b) => Math.abs(THREE.ShapeUtils.area(b.flat)) - Math.abs(THREE.ShapeUtils.area(a.flat)));
+  if (rings.length === 1) {
+    // A pointed cone has one circular rim; its other boundary is the apex.
+    const rim = rings[0].points;
+    const query = rim[0].clone().lerp(origin, 0.5);
+    const exact = occt.EvaluateExactFaceNormal(modelId, handle, "face", face.id, query.toArray());
+    if (!exact.ok) throw new Error(exact.message);
+    const sign = coneNormal(query).dot(new THREE.Vector3(...exact.localNormal)) < 0 ? -1 : 1;
+    const normals = rim.map((point) => coneNormal(point).multiplyScalar(sign));
+    // The normal is undefined at the apex. Give each triangle its own apex
+    // normal so the tip stays sharp and every stored normal remains finite.
+    const tips = normals.map((normal, i) => normal.clone().add(normals[(i + 1) % rim.length]).normalize());
+    const triangles = rim.map((_, i) => [i, (i + 1) % rim.length, rim.length + i]);
+    addFace(geometry, face, [...rim, ...rim.map(() => origin)], [...normals, ...tips], triangles);
+    return;
+  }
   if (rings.length !== 2) throw new Error(`Cannot triangulate CAD cone face ${face.id}`);
   // Join corresponding angular intervals. Planar polygon triangulation can span
   // the curved cone with long chords even when its projected annulus looks valid.
@@ -60,10 +79,6 @@ export function repairCone(occt, modelId, handle, geometry, face) {
   const query = sample.clone().multiplyScalar(height / sample.dot(axis)).add(origin);
   const exact = occt.EvaluateExactFaceNormal(modelId, handle, "face", face.id, query.toArray());
   if (!exact.ok) throw new Error(exact.message);
-  const coneNormal = (point) => {
-    const direction = point.clone().sub(origin);
-    return axis.clone().cross(direction).cross(direction).normalize();
-  };
   const sign = coneNormal(query).dot(new THREE.Vector3(...exact.localNormal)) < 0 ? -1 : 1;
   addFace(geometry, face, vertices, vertices.map((point) => coneNormal(point).multiplyScalar(sign)), triangles);
 }
@@ -113,8 +128,12 @@ function repairPlane(occt, modelId, handle, geometry, face) {
   const triangles = THREE.ShapeUtils.triangulateShape(rings[0].flat, rings.slice(1).map((ring) => ring.flat));
   if (!triangles.length) throw new Error(`Cannot triangulate CAD plane face ${face.id}`);
   const vertices = rings.flatMap((ring) => ring.points);
-  const query = triangles[0].reduce((sum, id) => sum.add(vertices[id]), new THREE.Vector3()).multiplyScalar(1 / 3);
-  const exact = occt.EvaluateExactFaceNormal(modelId, handle, "face", face.id, query.toArray());
+  // A display triangle can lie outside a very narrow curved boundary. Sample
+  // the exact CAD edge instead of projecting that approximate triangle center.
+  const edge = geometry.edges.find((edge) => edge.ownerFaceIds.includes(face.id) && edge.points.length);
+  const boundary = occt.MeasureExactEdgeLength(modelId, handle, "edge", edge.id);
+  if (!boundary.ok) throw new Error(boundary.message);
+  const exact = occt.EvaluateExactFaceNormal(modelId, handle, "face", face.id, boundary.localStartPoint);
   if (!exact.ok) throw new Error(exact.message);
   normal.fromArray(exact.localNormal);
   addFace(geometry, face, vertices, vertices.map(() => normal), triangles);
